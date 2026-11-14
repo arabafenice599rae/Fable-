@@ -1,45 +1,52 @@
 # Fable
 
-Chain proof-of-work su SHA-256 con firme SLH-DSA. La specifica è in [`SPEC.md`](SPEC.md) (v0.13).
+Proof-of-work chain on SHA-256 with SLH-DSA signatures. The spec is in [`SPEC.md`](SPEC.md) (v0.13).
 
-Questo repository contiene le regole di consenso in due implementazioni, i vettori di test e un server Stratum. Il nodo completo in Rust non c'è ancora.
+This repository holds the consensus rules in two implementations, the test vectors, a Stratum server, and the full node in Rust (see [`node/`](node/README.md)).
 
-| File | Cosa fa |
+| File | What it does |
 | --- | --- |
-| `fable.py` | Implementazione di riferimento delle regole di consenso |
-| `fable.mjs` | Seconda implementazione, in JavaScript e su un'altra libreria SLH-DSA |
-| `vectors.json` | Vettori di test e una catena simulata di 1.445 blocchi con 30 blocchi invalidi |
-| `gen_vectors.py` | Rigenera `vectors.json` dal riferimento |
-| `check_vectors.mjs` | Fa girare tutti i vettori sulla seconda implementazione |
-| `crosscheck.py` / `.mjs` | Confronto differenziale su casi casuali e blocchi alterati |
-| `stratum.py` | Server Stratum v1 per minare con un Bitaxe |
-| `bitaxe_sim.py` | Bitaxe simulato, portato dal firmware ESP-Miner |
-| `test_stratum.py` | Prova completa miner simulato ↔ server ↔ due implementazioni |
-| `cli.mjs` | Chiavi, indirizzi e firme da riga di comando |
+| `fable.py` | Reference implementation of the consensus rules |
+| `fable.mjs` | Second implementation, in JavaScript and on another SLH-DSA library |
+| `vectors.json` | Test vectors and a simulated chain of 1,445 blocks with 30 invalid blocks |
+| `gen_vectors.py` | Regenerates `vectors.json` from the reference |
+| `check_vectors.mjs` | Runs every vector through the second implementation |
+| `crosscheck.py` / `.mjs` | Differential comparison on random cases and altered blocks |
+| `stratum.py` | Stratum v1 server for mining with a Bitaxe |
+| `bitaxe_sim.py` | Simulated Bitaxe, ported from the ESP-Miner firmware |
+| `test_stratum.py` | Full test: simulated miner ↔ server ↔ both implementations |
+| `cli.mjs` | Keys, addresses and signatures from the command line |
+| `node/` | Rust reference node: consensus, storage, reorgs, mempool, P2P, Stratum, wallet |
 
-## Installazione
+## Installation
 
 ```
 pip install slh-dsa==0.2.5
 npm install
 ```
 
-## Verifiche
+The Rust node needs `cargo` (Rust 1.85 or later).
+
+## Checks
 
 ```
-python3 gen_vectors.py        # circa 20 secondi
+python3 gen_vectors.py        # about 20 seconds
 node check_vectors.mjs
-python3 crosscheck.py 1       # il numero è il seme casuale
+python3 crosscheck.py 1       # the number is the random seed
 python3 test_stratum.py 40
+cd node && cargo test --release && cd ..
+node/target/release/fable crosscheck   # after crosscheck.py
+python3 node/tests/e2e.py
+python3 node/tests/e2e_snapshot.py
 ```
 
-## Prova con un Bitaxe vero
+## Trying it with a real Bitaxe
 
 ```
-node cli.mjs wallet "<le tue 24 parole>" 0 0     # stampa l'indirizzo fb1...
+node cli.mjs wallet "<your 24 words>" 0 0     # prints the fb1... address
 python3 stratum.py --net lab --address fb1...
 ```
 
-Nel Bitaxe: pool = indirizzo IP di questo computer, porta 3333, utente a piacere.
-La rete `lab` ha la difficoltà della mainnet e un genesis usa e getta: con 1,2 TH/s esce circa un blocco al minuto.
-I blocchi finiscono in `chain.txt`; per ripartire da zero cancella `chain.txt` e `chain.txt.genesis`.
+On the Bitaxe: pool = this computer's IP address, port 3333, any user name.
+The `lab` network has mainnet difficulty and a throwaway genesis: at 1.2 TH/s a block comes out about once a minute.
+Blocks go to `chain.txt`; to start over, delete `chain.txt` and `chain.txt.genesis`.

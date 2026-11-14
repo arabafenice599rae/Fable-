@@ -1,120 +1,120 @@
-# Fable, specifica v0.13
+# Fable, spec v0.13
 
-Chain proof-of-work che sposta coin da una chiave a un'altra. SHA-256 è l'unica primitiva crittografica e le regole sono congelate al genesis.
-L'implementazione di riferimento è `fable.py`. Se questo testo e il codice non coincidono, vale il codice e il testo va corretto.
+A proof-of-work chain that moves coins from one key to another. SHA-256 is the only cryptographic primitive and the rules are frozen at genesis.
+The reference implementation is `fable.py`. If this text and the code disagree, the code wins and the text must be corrected.
 
-## 1. Codifiche e crittografia
+## 1. Encodings and cryptography
 
-- Tutti gli interi sono little-endian. Gli hash si scrivono nell'ordine dei byte in cui escono da SHA-256.
-- `H(tag, x) = SHA-256(byte(tag) ‖ x)`. Tag: TX = 1, SIG = 2, LEAF = 3, WIT = 4, ADDR = 5, UTXO = 6.
-- `sha256d(x) = SHA-256(SHA-256(x))`, usato per header, coinbase e nodi Merkle, come in Bitcoin.
-- Firma: SLH-DSA-SHA2-128s (FIPS 205), interfaccia "pure" con contesto vuoto. Chiave pubblica 32 byte, firma 7.856 byte.
-  Il consenso definisce solo la verifica: firme con o senza casualità aggiunta sono entrambe valide.
-- Indirizzo: `H(ADDR, chiave pubblica)`, 32 byte, riusabile.
-- Unità: 1 coin = 10^8 unità. Ticker: FABLE.
+- All integers are little-endian. Hashes are written in the byte order in which they come out of SHA-256.
+- `H(tag, x) = SHA-256(byte(tag) ‖ x)`. Tags: TX = 1, SIG = 2, LEAF = 3, WIT = 4, ADDR = 5, UTXO = 6.
+- `sha256d(x) = SHA-256(SHA-256(x))`, used for headers, coinbases and Merkle nodes, as in Bitcoin.
+- Signature: SLH-DSA-SHA2-128s (FIPS 205), "pure" interface with an empty context. Public key 32 bytes, signature 7,856 bytes.
+  Consensus defines only verification: signatures with or without added randomness are both valid.
+- Address: `H(ADDR, public key)`, 32 bytes, reusable.
+- Units: 1 coin = 10^8 units. Ticker: FABLE.
 
-## 2. Transazione
+## 2. Transaction
 
-| Campo | Byte | Valori |
+| Field | Bytes | Values |
 | --- | --- | --- |
 | `n_in` | 1 | 1–32 |
-| per input: `prev_txid`, `prev_index` | 32 + 1 | indice 0–15 |
+| per input: `prev_txid`, `prev_index` | 32 + 1 | index 0–15 |
 | `n_out` | 1 | 1–16 |
-| per output: `importo`, `indirizzo` | 8 + 32 | importo 1–2^62 |
+| per output: `amount`, `address` | 8 + 32 | amount 1–2^62 |
 | `n_wit` | 1 | 1–min(4, n_in) |
-| per testimone: chiave pubblica, firma | 32 + 7.856 | |
+| per witness: public key, signature | 32 + 7,856 | |
 
-- Il **corpo** è tutto fino agli output compresi. I **testimoni** sono `n_wit` seguito dalle coppie.
-- `txid = H(TX, corpo)`. Messaggio firmato: `H(SIG, chain_id ‖ corpo)`, uguale per tutti i testimoni.
-- Foglia Merkle: `H(LEAF, txid ‖ H(WIT, testimoni))`.
-- Dimensioni: 1 input e 2 output, 8.004 byte. 32 input da un indirizzo e 1 output, 8.987 byte. Massimo 33.251 byte. Un pagamento a 15 destinatari più il resto, da un indirizzo, pesa 8.564 byte.
+- The **body** is everything up to and including the outputs. The **witnesses** are `n_wit` followed by the pairs.
+- `txid = H(TX, body)`. Signed message: `H(SIG, chain_id ‖ body)`, the same for every witness.
+- Merkle leaf: `H(LEAF, txid ‖ H(WIT, witnesses))`.
+- Sizes: 1 input and 2 outputs, 8,004 bytes. 32 inputs from one address and 1 output, 8,987 bytes. Maximum 33,251 bytes. A payment to 15 recipients plus change, from one address, weighs 8,564 bytes.
 
-**Regole**
+**Rules**
 
-1. Contatori nei limiti, input tutti distinti, lunghezza esatta.
-2. Ogni input punta a un output non speso, anche creato prima nello stesso blocco. Un output di coinbase creato all'altezza `c` è spendibile da `c + 100`.
-3. I testimoni sono esattamente gli indirizzi distinti degli input, nell'ordine in cui compaiono per la prima volta, ciascuno come `H(ADDR, pk)`.
-4. Ogni firma è valida sul messaggio.
-5. Somma input ≥ somma output. La differenza è la fee.
+1. Counters within limits, all inputs distinct, exact length.
+2. Every input points to an unspent output, possibly created earlier in the same block. A coinbase output created at height `c` is spendable from `c + 100`.
+3. The witnesses are exactly the distinct addresses of the inputs, in the order in which they first appear, each as `H(ADDR, pk)`.
+4. Every signature is valid on the message.
+5. Sum of inputs ≥ sum of outputs. The difference is the fee.
 
-## 3. Blocco
+## 3. Block
 
-`blocco = header (80) ‖ coinbase ‖ n_tx (2 byte, 0–2.048) ‖ transazioni`, senza byte in coda.
+`block = header (80) ‖ coinbase ‖ n_tx (2 bytes, 0–2,048) ‖ transactions`, with no trailing bytes.
 
-**Header, layout di Bitcoin**: `version` (4, qualunque valore), `prev_hash` (32), `merkle_root` (32), `time` (4, i 32 bit bassi), `bits` (4), `nonce` (4).
+**Header, Bitcoin layout**: `version` (4, any value), `prev_hash` (32), `merkle_root` (32), `time` (4, the low 32 bits), `bits` (4), `nonce` (4).
 
-**Coinbase**: `height` (4) ‖ `extra` (8) ‖ `utxo_root` (32) ‖ `n_out` (1–2) ‖ output da 40 byte. Il suo id è `sha256d` dei suoi byte.
+**Coinbase**: `height` (4) ‖ `extra` (8) ‖ `utxo_root` (32) ‖ `n_out` (1–2) ‖ 40-byte outputs. Its id is `sha256d` of its bytes.
 
-**Merkle**: foglie = id della coinbase, poi le foglie delle transazioni in ordine. Nodo interno `sha256d(sinistro ‖ destro)`; un nodo spaiato sale invariato.
+**Merkle**: leaves = the coinbase id, then the transaction leaves in order. Inner node `sha256d(left ‖ right)`; an unpaired node moves up unchanged.
 
-**Regole**
+**Rules**
 
-1. `prev_hash` è l'hash della punta; `bits` è il valore ASERT; `sha256d(header)`, letto come intero little-endian, è ≤ target.
-2. `merkle_root` corrisponde; `height` della coinbase è l'altezza del blocco.
-3. `utxo_root` è quello della sezione 6 nei blocchi di snapshot, 32 zeri negli altri.
-4. Testimoni nel blocco, coinbase esclusa: al massimo `max_sigs(h)`. Parte da 80 e ogni 2.102.400 blocchi (4 anni) cresce del 40%, `s = s + s × 2 / 5` in divisione intera, fino al tetto di 2.048.
+1. `prev_hash` is the hash of the tip; `bits` is the ASERT value; `sha256d(header)`, read as a little-endian integer, is ≤ target.
+2. `merkle_root` matches; the coinbase `height` is the block's height.
+3. `utxo_root` is the one from section 6 in snapshot blocks, 32 zero bytes in the others.
+4. Witnesses in the block, coinbase excluded: at most `max_sigs(h)`. It starts at 80 and every 2,102,400 blocks (4 years) grows by 40%, `s = s + s × 2 / 5` in integer division, up to the cap of 2,048.
 
-   | Anni | 0 | 4 | 8 | 12 | 16 | 20 | 24 | 28 | 32 | 36 | 40 e oltre |
+   | Years | 0 | 4 | 8 | 12 | 16 | 20 | 24 | 28 | 32 | 36 | 40 and beyond |
    | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-   | Firme a blocco | 80 | 112 | 156 | 218 | 305 | 427 | 597 | 835 | 1.169 | 1.636 | 2.048 |
+   | Signatures per block | 80 | 112 | 156 | 218 | 305 | 427 | 597 | 835 | 1,169 | 1,636 | 2,048 |
 
-   All'inizio sono circa 0,64 MB a blocco con transazioni tipiche; al tetto, circa 16 MB.
-5. Output della coinbase ≤ sussidio + fee. Incassare meno è ammesso: la differenza è bruciata.
-6. Nessun output nuovo può avere un `(txid, indice)` già presente.
+   At the start that is about 0.64 MB per block with typical transactions; at the cap, about 16 MB.
+5. Coinbase outputs ≤ subsidy + fees. Collecting less is allowed: the difference is burned.
+6. No new output may have a `(txid, index)` that already exists.
 
-## 4. Consenso
+## 4. Consensus
 
-- Tempo di blocco 60 s. Vince la catena con più lavoro cumulato, lavoro di un blocco = `2^256 / (target + 1)`. A parità vale la prima vista. Nessun checkpoint.
-- **Tempo**: il valore pieno a 64 bit è il più piccolo maggiore del tempo del blocco precedente con quei 32 bit bassi. Deve essere ≤ orologio locale + 600 s.
-- **Difficoltà (aserti3-2d di Bitcoin Cash, ancorato al genesis)**, per il blocco dopo un genitore di altezza `h` e tempo `t`:
+- Block time 60 s. The chain with the most cumulative work wins, work of one block = `2^256 / (target + 1)`. On a tie, the first seen wins. No checkpoints.
+- **Time**: the full 64-bit value is the smallest one greater than the previous block's time with those low 32 bits. It must be ≤ local clock + 600 s.
+- **Difficulty (Bitcoin Cash's aserti3-2d, anchored at genesis)**, for the block after a parent of height `h` and time `t`:
   ```
   time_delta = t − (t_genesis − 60)
   num = (time_delta − 60 × (h + 1)) × 65536
-  exponent = num / 3600            divisione troncata verso zero
-  shifts = exponent >> 16          shift aritmetico
+  exponent = num / 3600            division truncated toward zero
+  shifts = exponent >> 16          arithmetic shift
   exponent −= shifts × 65536
   factor = ((195766423245049·e + 971821376·e² + 5127·e³ + 2^47) >> 48) + 65536
-  target = (target_genesis × factor) << shifts (o >> −shifts), poi >> 16
+  target = (target_genesis × factor) << shifts (or >> −shifts), then >> 16
   ```
-  Se `shifts > 300` o il risultato supera `0x1d00ffff` si usa `0x1d00ffff`; se `shifts < −300` o il risultato è 0 si usa 1. `bits` in forma compatta canonica.
-- **Genesis**: header con `version` 1, `prev_hash` = hash di un blocco Bitcoin scelto il giorno del lancio, `merkle_root` zero, `bits` `0x1b040000`, `nonce` 0. È una costante del codice, non viene validato e non crea coin. `chain_id = sha256d(header di genesis)`.
-- Rete di prova `test`: stesse regole, `bits` del genesis e massimo `0x207fffff`.
+  If `shifts > 300` or the result exceeds `0x1d00ffff`, `0x1d00ffff` is used; if `shifts < −300` or the result is 0, 1 is used. `bits` in canonical compact form.
+- **Genesis**: header with `version` 1, `prev_hash` = the hash of a Bitcoin block chosen on launch day, `merkle_root` zero, `bits` `0x1b040000`, `nonce` 0. It is a constant in the code, it is not validated and it creates no coins. `chain_id = sha256d(genesis header)`.
+- Test network `test`: same rules, genesis `bits` and maximum `0x207fffff`.
 
-## 5. Emissione
+## 5. Emission
 
-- `r = 50 coin`; ogni 131.400 blocchi `r = r − (r >> 4)`; mai sotto 1 coin.
-- Avvio lento: per `h < 43.200`, sussidio = `r × h / 43.200` (divisione intera).
-- Coda di 1 coin per blocco dal 61° trimestre. Circa 102 milioni di coin all'inizio della coda. Nessun premine.
+- `r = 50 coins`; every 131,400 blocks `r = r − (r >> 4)`; never below 1 coin.
+- Slow start: for `h < 43,200`, subsidy = `r × h / 43,200` (integer division).
+- Tail of 1 coin per block from the 61st quarter. About 102 million coins at the start of the tail. No premine.
 
-## 6. Stato e snapshot
+## 6. State and snapshots
 
-- Voce UTXO (78 byte): `txid (32) ‖ indice (1) ‖ importo (8) ‖ indirizzo (32) ‖ altezza (4) ‖ coinbase (1)`.
-- Nei blocchi con altezza multipla di 1.440, `utxo_root` è la radice Merkle delle foglie `H(UTXO, voce)` dell'insieme dopo il blocco precedente, ordinate per `(txid, indice)` in byte.
-- Snapshot scaricato a pezzi di 4.096 voci consecutive, ciascuno con la sua prova Merkle verso `utxo_root`.
-- Pruning: header, UTXO e ultimi 2.880 blocchi completi; sotto si possono scartare le firme.
+- UTXO entry (78 bytes): `txid (32) ‖ index (1) ‖ amount (8) ‖ address (32) ‖ height (4) ‖ coinbase (1)`.
+- In blocks whose height is a multiple of 1,440, `utxo_root` is the Merkle root of the leaves `H(UTXO, entry)` of the set after the previous block, sorted by `(txid, index)` in bytes.
+- A snapshot is downloaded in chunks of 4,096 consecutive entries, each with its Merkle proof against `utxo_root`.
+- Pruning: headers, UTXOs and the last 2,880 full blocks; below that, signatures may be discarded.
 
-## 7. Wallet (fuori consenso)
+## 7. Wallet (outside consensus)
 
-- Frase di 24 parole con lista e checksum BIP39.
-- `seed = PBKDF2-HMAC-SHA256(frase NFKD, "fable" ‖ passphrase NFKD, 2048 giri, 32 byte)`.
-- Per `(conto, indice)`: `HMAC-SHA256(seed, "fable/0" ‖ u32 conto ‖ u32 indice)` ‖ i primi 16 byte di `HMAC-SHA256(seed, "fable/1" ‖ u32 conto ‖ u32 indice)`: 48 byte usati come SK.seed, SK.prf e PK.seed della generazione delle chiavi FIPS 205.
-- Indirizzo: Bech32m con prefisso `fb`, 61 caratteri.
+- 24-word phrase with the BIP39 word list and checksum.
+- `seed = PBKDF2-HMAC-SHA256(NFKD phrase, "fable" ‖ NFKD passphrase, 2048 rounds, 32 bytes)`.
+- For `(account, index)`: `HMAC-SHA256(seed, "fable/0" ‖ u32 account ‖ u32 index)` ‖ the first 16 bytes of `HMAC-SHA256(seed, "fable/1" ‖ u32 account ‖ u32 index)`: 48 bytes used as SK.seed, SK.prf and PK.seed for FIPS 205 key generation.
+- Address: Bech32m with the `fb` prefix, 61 characters.
 
-## 8. Politica del nodo (fuori consenso, default modificabili)
+## 8. Node policy (outside consensus, changeable defaults)
 
-- Fee minima di inoltro 0,001 coin per firma; output minimo inoltrato 0,001 coin.
-- Mempool: tetto di 5.000 firme, ordine per fee per firma, sostituzione con fee più alta, al massimo 64 transazioni non confermate collegate tra loro.
-- Header accettati solo se la catena supera una soglia di lavoro; limiti di dimensione dei messaggi; peer in uscita da reti /16 diverse.
+- Minimum relay fee 0.001 coin per signature; minimum relayed output 0.001 coin.
+- Mempool: cap of 5,000 signatures, ordered by fee per signature, replacement with a higher fee, at most 64 unconfirmed transactions linked to each other.
+- Headers accepted only if the chain exceeds a work threshold; message size limits; outbound peers from different /16 networks.
 
-## 9. Rete e mining
+## 9. Network and mining
 
-- P2P su TCP, frame `lunghezza (4) ‖ tipo (1) ‖ contenuto`. Messaggi: `hello`, `peers`, `inv`, `get`, `tx`, `block`, `headers`, `snap`. Seed statici nel binario. Nessuna cifratura.
-- Stratum v1: `coinb1` = `height`, `extranonce1` + `extranonce2` = 4 + 4 byte = `extra`, `coinb2` = `utxo_root` ‖ output. Version rolling con maschera `0x1fffe000`.
+- P2P over TCP, frames `length (4) ‖ type (1) ‖ content`. Messages: `hello`, `peers`, `inv`, `get`, `tx`, `block`, `headers`, `snap`. Static seeds in the binary. No encryption.
+- Stratum v1: `coinb1` = `height`, `extranonce1` + `extranonce2` = 4 + 4 bytes = `extra`, `coinb2` = `utxo_root` ‖ outputs. Version rolling with mask `0x1fffe000`.
 
-## 10. Limiti noti
+## 10. Known limits
 
-- Nessuna difesa di protocollo contro il 51%.
-- Circa 1,3 transazioni al secondo all'inizio, 7 dopo 20 anni, 34 al tetto, con transazioni tipiche da 8 KB; fino a 20 pagamenti al secondo se raggruppati, 15 destinatari per firma.
-- L'insieme UTXO può crescere fino a 1.280 output al minuto.
-- La storia prima di uno snapshot è garantita dal solo PoW.
-- Le regole sono congelate: un bug di consenso si corregge solo con un hard fork concordato.
+- No protocol defence against a 51% attack.
+- About 1.3 transactions per second at the start, 7 after 20 years, 34 at the cap, with typical 8 KB transactions; up to 20 payments per second when batched, 15 recipients per signature.
+- The UTXO set can grow by up to 1,280 outputs per minute.
+- History before a snapshot is guaranteed by PoW alone.
+- The rules are frozen: a consensus bug can only be fixed by an agreed hard fork.
