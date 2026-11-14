@@ -1,6 +1,6 @@
 # Fable
 
-Proof-of-work chain on SHA-256 with SLH-DSA signatures. The spec is in [`SPEC.md`](SPEC.md) (v0.11).
+Proof-of-work chain on SHA-256 with SLH-DSA signatures. The spec is in [`SPEC.md`](SPEC.md) (v0.13).
 
 This repository holds the consensus rules in two implementations, the test vectors, a Stratum server, and the full node in Rust (see [`node/`](node/README.md)).
 
@@ -8,7 +8,7 @@ This repository holds the consensus rules in two implementations, the test vecto
 | --- | --- |
 | `fable.py` | Reference implementation of the consensus rules |
 | `fable.mjs` | Second implementation, in JavaScript and on another SLH-DSA library |
-| `vectors.json` | Test vectors and a simulated chain of 1,445 blocks with 29 invalid blocks |
+| `vectors.json` | Test vectors and a simulated chain of 1,445 blocks with 30 invalid blocks |
 | `gen_vectors.py` | Regenerates `vectors.json` from the reference |
 | `check_vectors.mjs` | Runs every vector through the second implementation |
 | `crosscheck.py` / `.mjs` | Differential comparison on random cases and altered blocks |

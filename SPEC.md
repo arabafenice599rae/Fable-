@@ -1,4 +1,4 @@
-# Fable, spec v0.11
+# Fable, spec v0.13
 
 A proof-of-work chain that moves coins from one key to another. SHA-256 is the only cryptographic primitive and the rules are frozen at genesis.
 The reference implementation is `fable.py`. If this text and the code disagree, the code wins and the text must be corrected.
@@ -18,8 +18,8 @@ The reference implementation is `fable.py`. If this text and the code disagree, 
 | Field | Bytes | Values |
 | --- | --- | --- |
 | `n_in` | 1 | 1–32 |
-| per input: `prev_txid`, `prev_index` | 32 + 1 | index 0–3 |
-| `n_out` | 1 | 1–4 |
+| per input: `prev_txid`, `prev_index` | 32 + 1 | index 0–15 |
+| `n_out` | 1 | 1–16 |
 | per output: `amount`, `address` | 8 + 32 | amount 1–2^62 |
 | `n_wit` | 1 | 1–min(4, n_in) |
 | per witness: public key, signature | 32 + 7,856 | |
@@ -27,7 +27,7 @@ The reference implementation is `fable.py`. If this text and the code disagree, 
 - The **body** is everything up to and including the outputs. The **witnesses** are `n_wit` followed by the pairs.
 - `txid = H(TX, body)`. Signed message: `H(SIG, chain_id ‖ body)`, the same for every witness.
 - Merkle leaf: `H(LEAF, txid ‖ H(WIT, witnesses))`.
-- Sizes: 1 input and 2 outputs, 8,004 bytes. 32 inputs from one address and 1 output, 8,987 bytes. Maximum 32,771 bytes.
+- Sizes: 1 input and 2 outputs, 8,004 bytes. 32 inputs from one address and 1 output, 8,987 bytes. Maximum 33,251 bytes. A payment to 15 recipients plus change, from one address, weighs 8,564 bytes.
 
 **Rules**
 
@@ -39,7 +39,7 @@ The reference implementation is `fable.py`. If this text and the code disagree, 
 
 ## 3. Block
 
-`block = header (80) ‖ coinbase ‖ n_tx (1 byte, 0–80) ‖ transactions`, with no trailing bytes.
+`block = header (80) ‖ coinbase ‖ n_tx (2 bytes, 0–2,048) ‖ transactions`, with no trailing bytes.
 
 **Header, Bitcoin layout**: `version` (4, any value), `prev_hash` (32), `merkle_root` (32), `time` (4, the low 32 bits), `bits` (4), `nonce` (4).
 
@@ -52,7 +52,13 @@ The reference implementation is `fable.py`. If this text and the code disagree, 
 1. `prev_hash` is the hash of the tip; `bits` is the ASERT value; `sha256d(header)`, read as a little-endian integer, is ≤ target.
 2. `merkle_root` matches; the coinbase `height` is the block's height.
 3. `utxo_root` is the one from section 6 in snapshot blocks, 32 zero bytes in the others.
-4. At most 80 witnesses in the block, coinbase excluded.
+4. Witnesses in the block, coinbase excluded: at most `max_sigs(h)`. It starts at 80 and every 2,102,400 blocks (4 years) grows by 40%, `s = s + s × 2 / 5` in integer division, up to the cap of 2,048.
+
+   | Years | 0 | 4 | 8 | 12 | 16 | 20 | 24 | 28 | 32 | 36 | 40 and beyond |
+   | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+   | Signatures per block | 80 | 112 | 156 | 218 | 305 | 427 | 597 | 835 | 1,169 | 1,636 | 2,048 |
+
+   At the start that is about 0.64 MB per block with typical transactions; at the cap, about 16 MB.
 5. Coinbase outputs ≤ subsidy + fees. Collecting less is allowed: the difference is burned.
 6. No new output may have a `(txid, index)` that already exists.
 
@@ -108,6 +114,7 @@ The reference implementation is `fable.py`. If this text and the code disagree, 
 ## 10. Known limits
 
 - No protocol defence against a 51% attack.
-- About 1.3 transactions per second with typical 8 KB transactions.
+- About 1.3 transactions per second at the start, 7 after 20 years, 34 at the cap, with typical 8 KB transactions; up to 20 payments per second when batched, 15 recipients per signature.
+- The UTXO set can grow by up to 1,280 outputs per minute.
 - History before a snapshot is guaranteed by PoW alone.
 - The rules are frozen: a consensus bug can only be fixed by an agreed hard fork.

@@ -12,6 +12,7 @@ const cmp = (group, got, want, what) => { counts[group] = (counts[group] || 0) +
 const n = d.numeric;
 for (const [net, h, t, bits] of n.asert) cmp('asert', F.asertBits(nets[net], h, t), bits, `${net} h=${h} t=${t}`);
 for (const [target, bits, back] of n.bits) { cmp('bits', F.targetToBits(BigInt(target)), bits, target); cmp('bits', '0x' + F.bitsToTarget(bits).toString(16), back, bits); }
+for (const [h, sigs] of n.max_sigs) cmp('max sigs', F.maxSigs(h), sigs, h);
 for (const [h, units] of n.subsidy) cmp('subsidy', F.subsidy(h), units, h);
 for (const [prev, t32, full] of n.time) cmp('time', F.fullTime(prev, t32), full, `${prev} ${t32}`);
 for (const [leaves, root] of n.merkle) cmp('merkle', hex(F.merkleRoot(leaves.map(bin))), root, leaves.length);

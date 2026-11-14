@@ -88,6 +88,8 @@ def unit_vectors(rng):
     v['asert'] = [{'net': n.name, 'height': h, 'time': t, 'bits': F.asert_bits(n, h, t)} for n in (F.MAIN, F.TEST) for h, t in cases]
     hs = [0, 1, 2, 43199, 43200, 43201, 131399, 131400, 131401, 262800, 61 * 131400 - 1, 61 * 131400, 62 * 131400, 10 ** 8, 2 ** 32 - 1]
     v['subsidy'] = [{'height': h, 'units': str(F.subsidy(h))} for h in hs]
+    v['max_sigs'] = [{'height': h, 'sigs': F.max_sigs(h)} for h in
+                     [0, 1, 2_102_399, 2_102_400, 4_204_800, 5 * 2_102_400, 5 * 2_102_400 + 7, 9 * 2_102_400, 10 * 2_102_400 - 1, 10 * 2_102_400, 50 * 2_102_400, 2 ** 32 - 1]]
     v['time'] = [{'prev': p, 'time32': t, 'full': F.full_time(p, t)} for p, t in
                  [(1794441600, 1794441660), (1794441600, 1794441600), (2 ** 32 - 10, 5), (2 ** 32 + 100, 100), (2 ** 32 + 100, 101), (3 * 2 ** 32 + 7, 6), (5 * 10 ** 12, 0)]]
     v['merkle'] = []
@@ -95,8 +97,8 @@ def unit_vectors(rng):
         leaves = [F.sha256(bytes([n, i])) for i in range(n)]
         v['merkle'].append({'leaves': [hx(x) for x in leaves], 'root': hx(F.merkle_root(leaves)), 'coinbase_branch': [hx(x) for x in F.coinbase_branch(leaves)]})
     v['tx'] = []
-    for n_in, n_out, n_wit in [(1, 1, 1), (1, 2, 1), (2, 2, 1), (2, 2, 2), (2, 1, 2), (5, 4, 3), (32, 4, 4), (32, 1, 1)]:
-        tx = F.Tx([(rng.randbytes(32), i % 4) for i in range(n_in)], [(rng.randrange(1, 10 ** 12), rng.randbytes(32)) for _ in range(n_out)],
+    for n_in, n_out, n_wit in [(1, 1, 1), (1, 2, 1), (2, 2, 1), (2, 2, 2), (2, 1, 2), (5, 4, 3), (32, 4, 4), (32, 1, 1), (3, 16, 2), (32, 16, 4)]:
+        tx = F.Tx([(rng.randbytes(32), i % 16) for i in range(n_in)], [(rng.randrange(1, 10 ** 12), rng.randbytes(32)) for _ in range(n_out)],
                   [(rng.randbytes(32), rng.randbytes(F.SIG_LEN)) for _ in range(n_wit)])
         v['tx'].append({'raw': hx(tx.serialize()), 'size': len(tx.serialize()), 'txid': hx(tx.txid()), 'sighash_main': hx(tx.sighash(F.MAIN.chain_id)), 'leaf': hx(tx.leaf())})
     v['genesis'] = [{'net': n.name, 'header': hx(n.genesis), 'chain_id': hx(n.chain_id)} for n in (F.MAIN, F.TEST)]
@@ -191,6 +193,7 @@ def chain_vectors(keys, rng, tip_height=1445):
     reject('coinbase spent before maturity', build_block(c, nt, pay(), [F.Tx([(cb[104], 0)], [(1, k0.addr)], [dummy])]).serialize())
     reject('witness key does not match the address', build_block(c, nt, pay(), [F.Tx([(cb[4], 0)], [(1, k0.addr)], [(k1.pk, bytes(F.SIG_LEN))])]).serialize())
     reject('same key given as two witnesses', build_block(c, nt, pay(), [F.Tx([(cb[4], 0), (cb[5], 0)], [(1, k0.addr)], [dummy, dummy])]).serialize())
+    reject('81 signatures in one block', build_block(c, nt, pay(), [F.Tx([(bytes([i]) * 32, 0)], [(1, k0.addr)], [dummy]) for i in range(81)]).serialize())
     reject('signature of zeros', build_block(c, nt, pay(), [F.Tx([(cb[4], 0)], [(1, k0.addr)], [dummy])]).serialize())
     flipped = F.Tx(good.ins, good.outs, [(k0.pk, good.wits[0][1][:4000] + bytes([good.wits[0][1][4000] ^ 1]) + good.wits[0][1][4001:])])
     reject('one signature bit flipped', build_block(c, nt, pay(), [flipped]).serialize())
@@ -221,11 +224,20 @@ def chain_vectors(keys, rng, tip_height=1445):
     extra_wit = F.Tx(tx5.ins, tx5.outs, tx5.wits + [(k1.pk, bytes(F.SIG_LEN))])
     reject('unused extra witness', build_block(c, nt, pay(2000), [extra_wit]).serialize())
     reject('33 inputs', build_block(c, nt, pay(), [F.Tx([(cb[i], 0) for i in range(6, 39)], [(1, k0.addr)], [dummy])]).serialize())
-    reject('5 outputs', build_block(c, nt, pay(), [F.Tx([(cb[6], 0)], [(1, k0.addr)] * 5, [dummy])]).serialize())
+    reject('17 outputs', build_block(c, nt, pay(), [F.Tx([(cb[6], 0)], [(1, k0.addr)] * 17, [dummy])]).serialize())
     reject('input listed twice', build_block(c, nt, pay(), [F.Tx([(cb[6], 0), (cb[7], 0), (cb[6], 0)], [(1, k0.addr)], [dummy])]).serialize())
-    reject('output index 4', build_block(c, nt, pay(), [F.Tx([(cb[6], 4)], [(1, k0.addr)], [dummy])]).serialize())
+    reject('output index 16', build_block(c, nt, pay(), [F.Tx([(cb[6], 16)], [(1, k0.addr)], [dummy])]).serialize())
     step([tx5, tx6])                                                         # 130
     assert c.height == 130
+
+    # ---- one payer, sixteen outputs; then outputs 10 and 15 are spent (two-digit indexes)
+    total6 = total5 - 5000
+    each = (total6 - 1000) // 16
+    outs7 = [(each, [k0, k1, k2][i % 3].addr) for i in range(15)] + [(total6 - 1000 - 15 * each, k1.addr)]
+    tx7 = mk([(tx6.txid(), 0)], outs7, [k0], 1000)
+    step([tx7])                                                              # 131
+    tx8 = mk([(tx7.txid(), 10), (tx7.txid(), 15)], [(each, k2.addr), (outs7[15][0] - 1500, k0.addr)], [k1], 1500)
+    step([tx8])                                                              # 132
 
     while c.height < tip_height:
         step()
@@ -239,7 +251,7 @@ def chain_vectors(keys, rng, tip_height=1445):
 
 def main():
     rng = random.Random(20261111)
-    out = {'spec': 'v0.11', 'unit': unit_vectors(rng)}
+    out = {'spec': 'v0.13', 'unit': unit_vectors(rng)}
     out['wallet'], keys = wallet_vectors()
     out['chain'] = chain_vectors(keys, rng)
     json.dump(out, open('vectors.json', 'w'), separators=(',', ':'))
