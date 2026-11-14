@@ -1,6 +1,6 @@
 # Fable
 
-Chain proof-of-work su SHA-256 con firme SLH-DSA. La specifica è in [`SPEC.md`](SPEC.md) (v0.12).
+Chain proof-of-work su SHA-256 con firme SLH-DSA. La specifica è in [`SPEC.md`](SPEC.md) (v0.13).
 
 Questo repository contiene le regole di consenso in due implementazioni, i vettori di test e un server Stratum. Il nodo completo in Rust non c'è ancora.
 
@@ -8,7 +8,7 @@ Questo repository contiene le regole di consenso in due implementazioni, i vetto
 | --- | --- |
 | `fable.py` | Implementazione di riferimento delle regole di consenso |
 | `fable.mjs` | Seconda implementazione, in JavaScript e su un'altra libreria SLH-DSA |
-| `vectors.json` | Vettori di test e una catena simulata di 1.445 blocchi con 29 blocchi invalidi |
+| `vectors.json` | Vettori di test e una catena simulata di 1.445 blocchi con 30 blocchi invalidi |
 | `gen_vectors.py` | Rigenera `vectors.json` dal riferimento |
 | `check_vectors.mjs` | Fa girare tutti i vettori sulla seconda implementazione |
 | `crosscheck.py` / `.mjs` | Confronto differenziale su casi casuali e blocchi alterati |
