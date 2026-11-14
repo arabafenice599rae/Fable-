@@ -4,11 +4,19 @@
 use std::io::{Read, Write};
 use std::net::{IpAddr, Ipv6Addr, SocketAddr};
 
-use crate::consensus::{Hash, Header, OutPoint, Reader, UTXO_ENTRY_LEN, UtxoEntry, parse_utxo_entry, utxo_entry};
+use crate::consensus::{
+    Hash, Header, OutPoint, Reader, SNAPSHOT_CHUNK, UTXO_ENTRY_LEN, UtxoEntry, max_block_size, parse_utxo_entry, utxo_entry,
+};
 
 pub const PROTOCOL_VERSION: u32 = 1;
-/// Largest content accepted. A block is at most about 0.65 MB; headers replies are 160 kB.
-pub const MAX_MESSAGE: usize = 1 << 21;
+/// The largest `snap` reply: a full chunk of entries and a proof of up to 255 hashes.
+pub const MAX_SNAP_MESSAGE: usize = 1 + 4 + 4 + 4 + 2 + SNAPSHOT_CHUNK * UTXO_ENTRY_LEN + 1 + 255 * 32;
+
+/// Largest content accepted when the next block is at `height`: the largest valid block there,
+/// and never less than a full snapshot chunk. Headers replies (160 kB) are always below both.
+pub fn max_message(height: u64) -> usize {
+    max_block_size(height).max(MAX_SNAP_MESSAGE)
+}
 pub const MAX_HEADERS: usize = 2_000;
 pub const MAX_INV: usize = 1_000;
 pub const MAX_PEERS_MSG: usize = 100;
@@ -211,11 +219,12 @@ impl Msg {
     }
 }
 
-pub fn read_msg(s: &mut impl Read) -> std::io::Result<Option<Msg>> {
+/// Read one frame; content longer than `cap` is refused before it is read.
+pub fn read_msg(s: &mut impl Read, cap: usize) -> std::io::Result<Option<Msg>> {
     let mut head = [0u8; 5];
     s.read_exact(&mut head)?;
     let n = u32::from_le_bytes(head[..4].try_into().unwrap()) as usize;
-    if n > MAX_MESSAGE {
+    if n > cap {
         return Err(std::io::Error::new(std::io::ErrorKind::InvalidData, "message too large"));
     }
     let mut c = vec![0u8; n];
@@ -257,7 +266,23 @@ mod tests {
         ];
         for m in msgs {
             let f = m.encode();
-            assert_eq!(read_msg(&mut &f[..]).unwrap(), Some(m));
+            assert_eq!(read_msg(&mut &f[..], max_message(0)).unwrap(), Some(m));
         }
+    }
+
+    #[test]
+    fn message_cap_follows_the_block_limit() {
+        use crate::consensus::*;
+        assert_eq!(MAX_TX_BYTES_PER_SIG, 9_587);
+        assert_eq!(max_message(0), 767_167);
+        assert_eq!(MAX_SNAP_MESSAGE, 327_664);
+        assert_eq!(max_message(SIGS_STEP), 207 + 112 * 9_587);
+        assert_eq!(max_message(40 * SIGS_STEP), 19_634_383);
+        // a frame one byte over the cap is refused without reading the content
+        let big = Msg::Block(vec![0; max_message(0) + 1]).encode();
+        assert!(read_msg(&mut &big[..], max_message(0)).is_err());
+        let ok = Msg::Block(vec![0; max_message(0)]).encode();
+        assert!(read_msg(&mut &ok[..], max_message(0)).is_ok());
+        {}
     }
 }
