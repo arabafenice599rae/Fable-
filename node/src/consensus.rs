@@ -270,6 +270,17 @@ pub fn max_sigs(height: u64) -> usize {
     s
 }
 
+/// Largest transaction bytes one witness can carry: 32 inputs, 16 outputs, one witness.
+pub const MAX_TX_BYTES_PER_SIG: usize = 3 + 33 * MAX_IN + 40 * MAX_OUT + PK_LEN + SIG_LEN;
+/// Header, the largest coinbase (two outputs) and the 2-byte transaction counter.
+pub const BLOCK_OVERHEAD: usize = 80 + 4 + 8 + 32 + 1 + 40 * MAX_CB_OUT + 2;
+
+/// Largest valid block at this height. A transaction with w witnesses is at most
+/// w × MAX_TX_BYTES_PER_SIG bytes, so the witness limit bounds the block.
+pub fn max_block_size(height: u64) -> usize {
+    BLOCK_OVERHEAD + max_sigs(height) * MAX_TX_BYTES_PER_SIG
+}
+
 // ---------------------------------------------------------------- time
 /// The header carries the low 32 bits. The full value is the smallest one after the parent.
 pub fn full_time(prev_time: i64, time32: u32) -> i64 {

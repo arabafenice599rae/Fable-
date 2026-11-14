@@ -198,6 +198,13 @@ impl Node {
         self.send(peer, Msg::Get { kind: GET_HEADERS, hashes: loc });
     }
 
+    /// Largest P2P content accepted now: the block limit one above the higher of the tip and
+    /// the best header, so blocks of a header chain that is ahead still fit.
+    pub fn max_message(&self) -> usize {
+        let best = self.cs.entry(&self.cs.best_header).map_or(0, |e| e.height);
+        max_message(self.cs.height().max(best) as u64 + 1)
+    }
+
     /// Ask for the blocks on the way to the best header, spread over the peers.
     pub fn request_blocks(&mut self) {
         if self.snap_mode {
@@ -633,7 +640,10 @@ impl Handle {
         });
         let mut r = std::io::BufReader::new(stream);
         let _ = r.get_ref().set_read_timeout(Some(Duration::from_secs(600)));
-        while let Ok(Some(m)) = read_msg(&mut r) {
+        loop {
+            // the cap follows the block limit at the next height we may be asked to take
+            let cap = self.lock().max_message();
+            let Ok(Some(m)) = read_msg(&mut r, cap) else { break };
             let mut n = self.lock();
             if n.stopping || !n.handle(id, m, self) {
                 break;

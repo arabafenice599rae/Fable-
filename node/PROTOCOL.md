@@ -11,8 +11,19 @@ All integers are little-endian and hashes are in SHA-256 byte order, as in the r
 length (4) ‖ type (1) ‖ content
 ```
 
-`length` counts the content bytes only. Maximum content 2 MiB: a block reaches about 0.65 MB.
-A message that does not decode, or has bytes left over, closes the connection.
+`length` counts the content bytes only. The maximum content follows the block limit and is checked before the content is read:
+
+```
+max_message = max(max_block_size(h), 327,664)
+max_block_size(h) = 207 + max_sigs(h) × 9,587
+```
+
+- `h` is one more than the higher of the node's tip and its best header, so that the blocks of a header chain that is ahead of the tip still fit.
+- 9,587 bytes is the most one witness can carry: a transaction with 32 inputs, 16 outputs and one witness. A transaction with `w` witnesses is at most `w × 9,587` bytes, so `max_sigs(h)` bounds the block. 207 bytes are the header, the largest coinbase (two outputs) and the transaction counter.
+- 327,664 bytes is the largest `snap` reply: 4,096 entries and a proof of up to 255 hashes. A `headers` reply is at most 160,002 bytes, below both.
+- At the start that is 767,167 bytes; after 4 years 1,073,951; at the 2,048 cap, 19,634,383.
+
+A message that is too long, does not decode, or has bytes left over closes the connection.
 
 | Type | Name | Content |
 | --- | --- | --- |
