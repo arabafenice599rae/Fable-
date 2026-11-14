@@ -2,7 +2,7 @@
 
 Chain proof-of-work su SHA-256 con firme SLH-DSA. La specifica è in [`SPEC.md`](SPEC.md) (v0.11).
 
-Questo repository contiene le regole di consenso in due implementazioni, i vettori di test e un server Stratum. Il nodo completo in Rust non c'è ancora.
+Questo repository contiene le regole di consenso in due implementazioni, i vettori di test, un server Stratum e il nodo completo in Rust (in [`node/`](node/README.md)).
 
 | File | Cosa fa |
 | --- | --- |
@@ -16,6 +16,7 @@ Questo repository contiene le regole di consenso in due implementazioni, i vetto
 | `bitaxe_sim.py` | Bitaxe simulato, portato dal firmware ESP-Miner |
 | `test_stratum.py` | Prova completa miner simulato ↔ server ↔ due implementazioni |
 | `cli.mjs` | Chiavi, indirizzi e firme da riga di comando |
+| `node/` | Nodo di riferimento in Rust: consenso, archivio, reorg, mempool, P2P, Stratum, wallet |
 
 ## Installazione
 
@@ -24,6 +25,8 @@ pip install slh-dsa==0.2.5
 npm install
 ```
 
+Per il nodo in Rust serve `cargo` (Rust 1.85 o successivo).
+
 ## Verifiche
 
 ```
@@ -31,6 +34,10 @@ python3 gen_vectors.py        # circa 20 secondi
 node check_vectors.mjs
 python3 crosscheck.py 1       # il numero è il seme casuale
 python3 test_stratum.py 40
+cd node && cargo test --release && cd ..
+node/target/release/fable crosscheck   # dopo crosscheck.py
+python3 node/tests/e2e.py
+python3 node/tests/e2e_snapshot.py
 ```
 
 ## Prova con un Bitaxe vero
