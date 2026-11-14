@@ -1,4 +1,4 @@
-// Fable: second implementation of the consensus rules, spec v0.12.
+// Fable: second implementation of the consensus rules, spec v0.13.
 // Written separately from fable.py, in another language and on another SLH-DSA library,
 // so that the two can be run against each other.
 import { createHash, createHmac, pbkdf2Sync } from 'node:crypto';
@@ -8,7 +8,8 @@ export const TAG = { TX: 1, SIG: 2, LEAF: 3, WIT: 4, ADDR: 5, UTXO: 6 };
 export const COIN = 100000000n;
 const MAX_AMOUNT = 1n << 62n;
 const BLOCK_TIME = 60n, HALFLIFE = 3600n, FUTURE_LIMIT = 600;
-const QUARTER = 131400, SLOW_START = 43200, MATURITY = 100, SNAPSHOT_EVERY = 1440, MAX_SIGS = 80;
+const QUARTER = 131400, SLOW_START = 43200, MATURITY = 100, SNAPSHOT_EVERY = 1440;
+const SIGS_START = 80, SIGS_STEP = 2102400, SIGS_CAP = 2048;
 const MAX_IN = 32, MAX_OUT = 16, MAX_WIT = 4, MAX_CB_OUT = 2;
 const PK_LEN = 32, SIG_LEN = 7856;
 const ZERO32 = Buffer.alloc(32);
@@ -20,6 +21,7 @@ export const sha256 = (b) => createHash('sha256').update(b).digest();
 export const sha256d = (b) => sha256(sha256(b));
 export const H = (tag, b) => sha256(Buffer.concat([Buffer.from([tag]), b]));
 const u32 = (n) => { const b = Buffer.alloc(4); b.writeUInt32LE(n >>> 0); return b; };
+const u16 = (n) => { const b = Buffer.alloc(2); b.writeUInt16LE(n); return b; };
 const u64 = (n) => { const b = Buffer.alloc(8); b.writeBigUInt64LE(n); return b; };
 const key = (txid, idx) => Buffer.from(txid).toString('hex') + idx.toString(16);   // idx is one hex digit, 0-f: sorts like the raw bytes
 const leInt = (buf) => BigInt('0x' + Buffer.from(buf).reverse().toString('hex'));
@@ -78,6 +80,17 @@ export function subsidy(height) {
   }
   if (height < SLOW_START) r = r * BigInt(height) / BigInt(SLOW_START);
   return r;
+}
+
+// witnesses allowed in the block at this height: +40% every 4 years, up to the cap
+export function maxSigs(height) {
+  let s = SIGS_START;
+  const steps = Math.floor(height / SIGS_STEP);
+  for (let i = 0; i < steps; i++) {
+    s += Math.floor((s * 2) / 5);
+    if (s >= SIGS_CAP) return SIGS_CAP;
+  }
+  return s;
 }
 
 // ---------------------------------------------------------------- time
@@ -153,14 +166,14 @@ function readCoinbase(r) { return { height: r.u32(), extra: r.take(8), utxoRoot:
 
 export function readBlock(buf) {
   const r = new Reader(buf);
-  const header = r.take(80), coinbase = readCoinbase(r), n = r.u8();
-  if (n > MAX_SIGS) bad('parse');
+  const header = r.take(80), coinbase = readCoinbase(r), n = r.take(2).readUInt16LE();
+  if (n > SIGS_CAP) bad('parse');
   const txs = [];
   for (let i = 0; i < n; i++) txs.push(readTx(r));
   if (r.o !== buf.length) bad('parse');
   return { header, coinbase, txs };
 }
-export const blockSerialize = (b) => Buffer.concat([b.header, coinbaseSerialize(b.coinbase), Buffer.from([b.txs.length]), ...b.txs.map(txSerialize)]);
+export const blockSerialize = (b) => Buffer.concat([b.header, coinbaseSerialize(b.coinbase), u16(b.txs.length), ...b.txs.map(txSerialize)]);
 
 // ---------------------------------------------------------------- signatures and addresses
 export const address = (pk) => H(TAG.ADDR, pk);
@@ -196,7 +209,7 @@ export class Chain {
     if (!mroot.equals(merkleRoot([coinbaseId(blk.coinbase), ...blk.txs.map(txLeaf)]))) bad('merkle');
     if (blk.coinbase.height !== h) bad('cbheight');
     if (!blk.coinbase.utxoRoot.equals(this.nextUtxoRoot())) bad('utxoroot');
-    if (blk.txs.reduce((s, x) => s + x.wits.length, 0) > MAX_SIGS) bad('sigs');
+    if (blk.txs.reduce((s, x) => s + x.wits.length, 0) > maxSigs(h)) bad('sigs');
 
     const view = new Map(), spent = new Set();
     let fees = 0n;

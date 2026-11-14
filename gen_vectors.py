@@ -88,6 +88,8 @@ def unit_vectors(rng):
     v['asert'] = [{'net': n.name, 'height': h, 'time': t, 'bits': F.asert_bits(n, h, t)} for n in (F.MAIN, F.TEST) for h, t in cases]
     hs = [0, 1, 2, 43199, 43200, 43201, 131399, 131400, 131401, 262800, 61 * 131400 - 1, 61 * 131400, 62 * 131400, 10 ** 8, 2 ** 32 - 1]
     v['subsidy'] = [{'height': h, 'units': str(F.subsidy(h))} for h in hs]
+    v['max_sigs'] = [{'height': h, 'sigs': F.max_sigs(h)} for h in
+                     [0, 1, 2_102_399, 2_102_400, 4_204_800, 5 * 2_102_400, 5 * 2_102_400 + 7, 9 * 2_102_400, 10 * 2_102_400 - 1, 10 * 2_102_400, 50 * 2_102_400, 2 ** 32 - 1]]
     v['time'] = [{'prev': p, 'time32': t, 'full': F.full_time(p, t)} for p, t in
                  [(1794441600, 1794441660), (1794441600, 1794441600), (2 ** 32 - 10, 5), (2 ** 32 + 100, 100), (2 ** 32 + 100, 101), (3 * 2 ** 32 + 7, 6), (5 * 10 ** 12, 0)]]
     v['merkle'] = []
@@ -191,6 +193,7 @@ def chain_vectors(keys, rng, tip_height=1445):
     reject('coinbase spent before maturity', build_block(c, nt, pay(), [F.Tx([(cb[104], 0)], [(1, k0.addr)], [dummy])]).serialize())
     reject('witness key does not match the address', build_block(c, nt, pay(), [F.Tx([(cb[4], 0)], [(1, k0.addr)], [(k1.pk, bytes(F.SIG_LEN))])]).serialize())
     reject('same key given as two witnesses', build_block(c, nt, pay(), [F.Tx([(cb[4], 0), (cb[5], 0)], [(1, k0.addr)], [dummy, dummy])]).serialize())
+    reject('81 signatures in one block', build_block(c, nt, pay(), [F.Tx([(bytes([i]) * 32, 0)], [(1, k0.addr)], [dummy]) for i in range(81)]).serialize())
     reject('signature of zeros', build_block(c, nt, pay(), [F.Tx([(cb[4], 0)], [(1, k0.addr)], [dummy])]).serialize())
     flipped = F.Tx(good.ins, good.outs, [(k0.pk, good.wits[0][1][:4000] + bytes([good.wits[0][1][4000] ^ 1]) + good.wits[0][1][4001:])])
     reject('one signature bit flipped', build_block(c, nt, pay(), [flipped]).serialize())
@@ -248,7 +251,7 @@ def chain_vectors(keys, rng, tip_height=1445):
 
 def main():
     rng = random.Random(20261111)
-    out = {'spec': 'v0.12', 'unit': unit_vectors(rng)}
+    out = {'spec': 'v0.13', 'unit': unit_vectors(rng)}
     out['wallet'], keys = wallet_vectors()
     out['chain'] = chain_vectors(keys, rng)
     json.dump(out, open('vectors.json', 'w'), separators=(',', ':'))

@@ -16,6 +16,7 @@ for (const c of u.sha256d) eq('sha256d', hex(F.sha256d(bin(c.data))), c.out);
 for (const c of u.bits) { const t = F.bitsToTarget(c.bits); eq('bits', '0x' + t.toString(16), c.target, c.bits); eq('bits back', F.targetToBits(t), c.back, c.bits); }
 for (const c of u.asert) eq('asert', F.asertBits(nets[c.net], c.height, c.time), c.bits, `${c.net} h=${c.height} t=${c.time}`);
 for (const c of u.subsidy) eq('subsidy', F.subsidy(c.height), c.units, c.height);
+for (const c of u.max_sigs) eq('max sigs', F.maxSigs(c.height), c.sigs, c.height);
 for (const c of u.time) eq('time', F.fullTime(c.prev, c.time32), c.full, c.prev);
 for (const c of u.merkle) eq('merkle', hex(F.merkleRoot(c.leaves.map(bin))), c.root, c.leaves.length);
 for (const c of u.merkle) {                                   // fold the branch the way a Stratum miner does
@@ -25,7 +26,7 @@ for (const c of u.merkle) {                                   // fold the branch
   eq('merkle branch', hex(h), c.root, c.leaves.length);
 }
 for (const c of u.tx) {
-  const raw = bin(c.raw), blk = F.readBlock(Buffer.concat([Buffer.alloc(80), Buffer.alloc(44), Buffer.from([1]), Buffer.alloc(7, 1), Buffer.alloc(33, 1), Buffer.from([1]), raw]));
+  const raw = bin(c.raw), blk = F.readBlock(Buffer.concat([Buffer.alloc(80), Buffer.alloc(44), Buffer.from([1]), Buffer.alloc(7, 1), Buffer.alloc(33, 1), Buffer.from([1, 0]), raw]));
   const tx = blk.txs[0];
   eq('tx size', raw.length, c.size); eq('tx roundtrip', hex(F.txSerialize(tx)), c.raw, 'bytes'); eq('txid', hex(F.txId(tx)), c.txid);
   eq('sighash', hex(F.sigHash(tx, F.MAIN.chainId)), c.sighash_main); eq('leaf', hex(F.txLeaf(tx)), c.leaf);

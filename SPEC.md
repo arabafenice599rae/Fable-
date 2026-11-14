@@ -1,4 +1,4 @@
-# Fable, specifica v0.12
+# Fable, specifica v0.13
 
 Chain proof-of-work che sposta coin da una chiave a un'altra. SHA-256 è l'unica primitiva crittografica e le regole sono congelate al genesis.
 L'implementazione di riferimento è `fable.py`. Se questo testo e il codice non coincidono, vale il codice e il testo va corretto.
@@ -39,7 +39,7 @@ L'implementazione di riferimento è `fable.py`. Se questo testo e il codice non 
 
 ## 3. Blocco
 
-`blocco = header (80) ‖ coinbase ‖ n_tx (1 byte, 0–80) ‖ transazioni`, senza byte in coda.
+`blocco = header (80) ‖ coinbase ‖ n_tx (2 byte, 0–2.048) ‖ transazioni`, senza byte in coda.
 
 **Header, layout di Bitcoin**: `version` (4, qualunque valore), `prev_hash` (32), `merkle_root` (32), `time` (4, i 32 bit bassi), `bits` (4), `nonce` (4).
 
@@ -52,7 +52,13 @@ L'implementazione di riferimento è `fable.py`. Se questo testo e il codice non 
 1. `prev_hash` è l'hash della punta; `bits` è il valore ASERT; `sha256d(header)`, letto come intero little-endian, è ≤ target.
 2. `merkle_root` corrisponde; `height` della coinbase è l'altezza del blocco.
 3. `utxo_root` è quello della sezione 6 nei blocchi di snapshot, 32 zeri negli altri.
-4. Al massimo 80 testimoni nel blocco, coinbase esclusa (circa 0,64 MB con transazioni tipiche, 0,77 MB al massimo).
+4. Testimoni nel blocco, coinbase esclusa: al massimo `max_sigs(h)`. Parte da 80 e ogni 2.102.400 blocchi (4 anni) cresce del 40%, `s = s + s × 2 / 5` in divisione intera, fino al tetto di 2.048.
+
+   | Anni | 0 | 4 | 8 | 12 | 16 | 20 | 24 | 28 | 32 | 36 | 40 e oltre |
+   | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+   | Firme a blocco | 80 | 112 | 156 | 218 | 305 | 427 | 597 | 835 | 1.169 | 1.636 | 2.048 |
+
+   All'inizio sono circa 0,64 MB a blocco con transazioni tipiche; al tetto, circa 16 MB.
 5. Output della coinbase ≤ sussidio + fee. Incassare meno è ammesso: la differenza è bruciata.
 6. Nessun output nuovo può avere un `(txid, indice)` già presente.
 
@@ -108,7 +114,7 @@ L'implementazione di riferimento è `fable.py`. Se questo testo e il codice non 
 ## 10. Limiti noti
 
 - Nessuna difesa di protocollo contro il 51%.
-- Circa 1,3 transazioni al secondo con transazioni tipiche da 8 KB; fino a 20 pagamenti al secondo se raggruppati, 15 destinatari per firma.
+- Circa 1,3 transazioni al secondo all'inizio, 7 dopo 20 anni, 34 al tetto, con transazioni tipiche da 8 KB; fino a 20 pagamenti al secondo se raggruppati, 15 destinatari per firma.
 - L'insieme UTXO può crescere fino a 1.280 output al minuto.
 - La storia prima di uno snapshot è garantita dal solo PoW.
 - Le regole sono congelate: un bug di consenso si corregge solo con un hard fork concordato.

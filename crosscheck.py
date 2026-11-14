@@ -12,7 +12,11 @@ from gen_vectors import remine
 
 
 def numeric(rng):
-    out = {'asert': [], 'bits': [], 'subsidy': [], 'time': [], 'merkle': [], 'address': []}
+    out = {'asert': [], 'bits': [], 'subsidy': [], 'time': [], 'merkle': [], 'address': [], 'max_sigs': []}
+    for _ in range(2000):
+        h = rng.choice((rng.randrange(0, 2 ** 32), F.SIGS_STEP * rng.randrange(0, 15) + rng.randrange(-2, 3)))
+        h = max(h, 0)
+        out['max_sigs'].append([h, F.max_sigs(h)])
     for _ in range(20000):
         net = rng.choice((F.MAIN, F.TEST))
         h = rng.choice((rng.randrange(0, 200), rng.randrange(0, 10 ** 7), rng.randrange(0, 2 ** 32)))

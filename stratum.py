@@ -76,7 +76,7 @@ class Pool:
             return False, 'share above target'
         if value > F.bits_to_target(job['bits']):
             return True, 'share'
-        raw = header + coinbase + b'\x00'
+        raw = header + coinbase + b'\x00\x00'
         try:
             self.chain.apply(raw, int(self.clock()))
         except F.Invalid as e:

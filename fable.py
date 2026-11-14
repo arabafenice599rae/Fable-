@@ -1,4 +1,4 @@
-"""Fable: reference implementation of the consensus rules, spec v0.12.
+"""Fable: reference implementation of the consensus rules, spec v0.13.
 
 Everything a node needs to decide whether a block is valid. No networking, no storage.
 The only dependency outside the standard library is an SLH-DSA verifier.
@@ -21,7 +21,7 @@ QUARTER = 131_400                 # blocks between subsidy steps
 SLOW_START = 43_200               # blocks of linear ramp
 MATURITY = 100
 SNAPSHOT_EVERY = 1_440
-MAX_SIGS = 80                     # witnesses per block, coinbase excluded
+SIGS_START, SIGS_STEP, SIGS_CAP = 80, 2_102_400, 2048   # witnesses per block: +40% every 4 years, up to the cap
 MAX_IN, MAX_OUT, MAX_WIT = 32, 16, 4  # per transaction
 MAX_CB_OUT = 2
 PK_LEN, SIG_LEN = 32, 7_856
@@ -120,6 +120,16 @@ def subsidy(height):
     if height < SLOW_START:
         r = r * height // SLOW_START
     return r
+
+
+def max_sigs(height):
+    """Witnesses allowed in the block at this height, coinbase excluded."""
+    s = SIGS_START
+    for _ in range(height // SIGS_STEP):
+        s += s * 2 // 5
+        if s >= SIGS_CAP:
+            return SIGS_CAP
+    return s
 
 
 # ---------------------------------------------------------------- time
@@ -258,7 +268,7 @@ class Block:
         self.header, self.coinbase, self.txs = header, coinbase, txs
 
     def serialize(self):
-        return self.header + self.coinbase.serialize() + bytes([len(self.txs)]) + b''.join(t.serialize() for t in self.txs)
+        return self.header + self.coinbase.serialize() + struct.pack('<H', len(self.txs)) + b''.join(t.serialize() for t in self.txs)
 
     def leaves(self):
         return [self.coinbase.txid()] + [t.leaf() for t in self.txs]
@@ -268,8 +278,8 @@ def read_block(buf):
     r = Reader(buf)
     header = r.take(80)
     cb = read_coinbase(r)
-    n = r.u8()
-    if n > MAX_SIGS:
+    n = struct.unpack('<H', r.take(2))[0]
+    if n > SIGS_CAP:
         raise Invalid('parse')
     txs = [read_tx(r) for _ in range(n)]
     if r.o != len(buf):
@@ -335,7 +345,7 @@ class Chain:
             raise Invalid('cbheight')
         if blk.coinbase.utxo_root != self.next_utxo_root():
             raise Invalid('utxoroot')
-        if sum(len(t_.wits) for t_ in blk.txs) > MAX_SIGS:
+        if sum(len(t_.wits) for t_ in blk.txs) > max_sigs(h):
             raise Invalid('sigs')
 
         view, spent, fees = {}, set(), 0     # outputs created and spent inside this block
