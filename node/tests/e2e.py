@@ -1,11 +1,12 @@
 """End-to-end test of the Rust node over real sockets. Run from the repository root after
-`cargo build --release` in node/:
+`cargo build --release` at the root (both crates):
 
     python3 node/tests/e2e.py
 
 1. node A (with Stratum) and node B (connected to A); A mines 110 blocks, B follows;
-2. a wallet payment sent to A reaches B's mempool;
-3. the simulated Bitaxe mines it through Stratum: the job has a non-empty merkle branch;
+2. a payment sent to A with fable-tools reaches B's mempool;
+3. the simulated Bitaxe mines it through fable-tools stratum, which takes its jobs from A's
+   gettemplate: the job has a non-empty merkle branch;
 4. node C, given the first 110 blocks, mines a longer branch alone; connected to A it makes A and B reorganise,
    and the payment goes back into their mempools; C then mines it;
 5. A restarts from its block file at the same tip;
@@ -25,10 +26,12 @@ sys.path.insert(0, ROOT)
 import bitaxe_sim  # noqa: E402
 import fable as F  # noqa: E402
 
-BIN = os.path.join(ROOT, 'node', 'target', 'release', 'fable')
+BIN = os.path.join(ROOT, 'target', 'release', 'fable')
+TOOLS = os.path.join(ROOT, 'target', 'release', 'fable-tools')
 WORDS = 'abandon ' * 23 + 'art'
 TMP = tempfile.mkdtemp(prefix='fable-e2e-')
 procs = {}
+helpers = []                                   # fable-tools processes
 
 
 def free_port():
@@ -70,8 +73,22 @@ def call(name, method, *params):
     return r['result']
 
 
-def cli(*args):
-    return subprocess.run([BIN, *args], capture_output=True, text=True, check=True).stdout
+def cli(*args, binary=BIN):
+    return subprocess.run([binary, *args], capture_output=True, text=True, check=True).stdout
+
+
+def start_stratum(node, payout):
+    port = free_port()
+    log = open(os.path.join(TMP, 'stratum.log'), 'a')
+    helpers.append(subprocess.Popen([TOOLS, 'stratum', '--payout', payout, '--listen', '127.0.0.1:%d' % port,
+                                     '--rpc', '127.0.0.1:%d' % procs[node][2]], stdout=log, stderr=log))
+    for _ in range(100):
+        try:
+            socket.create_connection(('127.0.0.1', port)).close()
+            return port
+        except OSError:
+            time.sleep(0.05)
+    raise RuntimeError('fable-tools stratum did not start')
 
 
 def stop(name):
@@ -99,8 +116,8 @@ def wait(what, cond, timeout=60):
 def main():
     addrs = [json.loads(line)['address'] for line in cli('wallet', 'address', '--words', WORDS, '--count', '2').splitlines()]
     a0, a1 = addrs
-    stratum_port = free_port()
-    pa, _ = start('a', '--stratum', '127.0.0.1:%d' % stratum_port, '--payout', a0)
+    pa, _ = start('a')
+    stratum_port = start_stratum('a', a0)
     start('b', '--connect', '127.0.0.1:%d' % pa)
     wait('b connects', lambda: call('b', 'getinfo')['peers'] == 1)
 
@@ -108,9 +125,10 @@ def main():
     wait('b syncs', lambda: call('b', 'getinfo')['tip'] == call('a', 'getinfo')['tip'])
     print('1. A mined 110 blocks, B is at the same tip')
 
-    out = json.loads(cli('wallet', 'send', '--words', WORDS, '--to', a1, '--amount', '0.01', '--rpc', '127.0.0.1:%d' % procs['a'][2]))
+    out = json.loads(cli('wallet', 'send', '--words', WORDS, '--to', a1, '--amount', '0.01', '--rpc', '127.0.0.1:%d' % procs['a'][2],
+                         binary=TOOLS))
     txid = out['txid']
-    wait('tx relay', lambda: any(t['txid'] == txid for t in call('b', 'getmempool')))
+    wait('tx relay', lambda: call('b', 'getinfo')['mempool_txs'] == 1)
     print('2. payment %s… (%d bytes, fee %s) is in both mempools' % (txid[:16], out['size'], out['fee']))
 
     m = bitaxe_sim.Miner('127.0.0.1', stratum_port)
@@ -119,7 +137,7 @@ def main():
     assert branch, 'a job with a transaction has a merkle branch'
     m.mine(1)
     assert not m.rejected, m.rejected
-    wait('confirmation', lambda: not call('a', 'getmempool') and not call('b', 'getmempool'))
+    wait('confirmation', lambda: call('a', 'getinfo')['mempool_txs'] == call('b', 'getinfo')['mempool_txs'] == 0)
     tip = call('a', 'getblock', str(call('a', 'getinfo')['height']))
     assert txid in tip['txs'], tip
     wait('b follows', lambda: call('b', 'getinfo')['tip'] == call('a', 'getinfo')['tip'])
@@ -131,8 +149,8 @@ def main():
     call('c', 'generate', 5, a1)                             # then 111 to 115 alone, without the payment
     call('a', 'addpeer', '127.0.0.1:%d' % pc)
     wait('reorg', lambda: call('a', 'getinfo')['tip'] == call('c', 'getinfo')['tip'] == call('b', 'getinfo')['tip'], timeout=90)
-    wait('payment back in the mempool', lambda: any(t['txid'] == txid for t in call('a', 'getmempool')))
-    wait('c learns it', lambda: any(t['txid'] == txid for t in call('c', 'getmempool')))
+    wait('payment back in the mempool', lambda: call('a', 'getinfo')['mempool_txs'] == 1)
+    wait('c learns it', lambda: call('c', 'getinfo')['mempool_txs'] == 1)
     call('c', 'generate', 1, a1)
     wait('all agree', lambda: len({call(n, 'getinfo')['tip'] for n in 'abc'}) == 1)
     info = call('a', 'getinfo')
@@ -169,8 +187,8 @@ if __name__ == '__main__':
     try:
         main()
     finally:
-        for n in list(procs):
-            procs[n][0].terminate()
+        for p in [v[0] for v in procs.values()] + helpers:
+            p.terminate()
         if os.environ.get('KEEP'):
             print('logs in', TMP)
         else:

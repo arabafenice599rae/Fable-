@@ -1,0 +1,15 @@
+[package]
+name = "fable-tools"
+version = "0.1.0"
+edition = "2024"
+description = "Tools that talk to a Fable node over its control interface: Stratum v1 server, wallet payments"
+
+[[bin]]
+name = "fable-tools"
+path = "src/main.rs"
+
+[dependencies]
+fable-node = { path = "../node" }
+num-bigint = "0.5.1"
+num-traits = "0.2.19"
+serde_json = "1.0.154"

@@ -117,7 +117,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "fable"
+name = "fable-node"
 version = "0.1.0"
 dependencies = [
  "bip39",
@@ -130,6 +130,16 @@ dependencies = [
  "sha2",
  "slh-dsa",
  "unicode-normalization",
+]
+
+[[package]]
+name = "fable-tools"
+version = "0.1.0"
+dependencies = [
+ "fable-node",
+ "num-bigint",
+ "num-traits",
+ "serde_json",
 ]
 
 [[package]]

@@ -10,6 +10,26 @@ fn keys() -> Vec<Key> {
     (0..3).map(|i| Key::derive(&seed, 0, i)).collect()
 }
 
+/// Fill in the witnesses: one per distinct input address, in order of first appearance.
+/// `input_addrs[i]` is the address that owns `tx.ins[i]`.
+fn sign_tx(tx: &mut Tx, input_addrs: &[Hash], keys: &[&Key], chain_id: &Hash) -> std::result::Result<(), String> {
+    let mut want: Vec<Hash> = Vec::new();
+    for a in input_addrs {
+        if !want.contains(a) {
+            want.push(*a);
+        }
+    }
+    let msg = tx.sighash(chain_id);
+    tx.wits = want
+        .iter()
+        .map(|a| {
+            let k = keys.iter().find(|k| &k.addr == a).ok_or_else(|| format!("no key for address {}", wallet::encode_address(a)))?;
+            Ok(Witness { pk: k.pk, sig: k.sign(&msg) })
+        })
+        .collect::<std::result::Result<_, String>>()?;
+    Ok(())
+}
+
 fn mem(net: Net) -> ChainState {
     ChainState::new(net, BlockStore::memory())
 }
@@ -90,13 +110,17 @@ fn most_work_wins_and_ties_keep_the_first() {
 }
 
 #[test]
-fn orphans_wait_for_their_parent() {
+fn a_block_with_an_unknown_parent_is_not_kept() {
     let k = keys();
     let (mut a, mut b) = (mem(Net::test()), mem(Net::test()));
     let mut pa = Mempool::default();
-    let raws: Vec<_> = (0..6).map(|i| step(&mut a, &mut pa, k[0].addr, i)).collect();
-    for raw in raws.iter().rev() {
-        let _ = b.accept_block(raw, NO_CLOCK);
+    let raws: Vec<_> = (0..3).map(|i| step(&mut a, &mut pa, k[0].addr, i)).collect();
+    // out of order: the child is refused as an orphan and not stored, so it has to come again
+    assert_eq!(b.accept_block(&raws[1], NO_CLOCK).0, Ok(Accepted::Orphan));
+    assert_eq!(b.accept_block(&raws[0], NO_CLOCK).0, Ok(Accepted::Stored));
+    assert_eq!(b.height(), 1);
+    for raw in &raws[1..] {
+        assert_eq!(b.accept_block(raw, NO_CLOCK).0, Ok(Accepted::Stored));
     }
     assert_eq!(b.state.tip, a.state.tip);
 }
@@ -158,7 +182,7 @@ fn mempool_spend_replace_mine_and_reorg_back() {
     let fee = COIN / 1000;
     let mk = |fee: u64, to: Hash| {
         let mut tx = Tx { ins: ins.clone(), outs: vec![Output { amount: value - fee, addr: to }], wits: vec![] };
-        wallet::sign_tx(&mut tx, &owners, &[&k[0]], &chain_id).unwrap();
+        sign_tx(&mut tx, &owners, &[&k[0]], &chain_id).unwrap();
         tx
     };
     let tx1 = mk(fee, k[1].addr);
@@ -167,7 +191,7 @@ fn mempool_spend_replace_mine_and_reorg_back() {
     // a child of tx1, spent by k1
     let mut child =
         Tx { ins: vec![OutPoint { txid: id1, index: 0 }], outs: vec![Output { amount: value - 3 * fee, addr: k[2].addr }], wits: vec![] };
-    wallet::sign_tx(&mut child, &[k[1].addr], &[&k[1]], &chain_id).unwrap();
+    sign_tx(&mut child, &[k[1].addr], &[&k[1]], &chain_id).unwrap();
     pool.accept(child.clone(), &cs.state).unwrap();
     assert_eq!(pool.len(), 2);
     // replacing tx1 needs more than tx1 + child together

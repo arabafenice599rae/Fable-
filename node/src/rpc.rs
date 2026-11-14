@@ -10,7 +10,7 @@ use crate::chainstate::Accepted;
 use crate::consensus::*;
 use crate::miner;
 use crate::node::{Handle, now};
-use crate::wallet::{encode_address, parse_address};
+use crate::wallet::parse_address;
 use std::result::Result;
 
 pub fn serve(h: Handle, addr: SocketAddr) -> std::io::Result<SocketAddr> {
@@ -65,32 +65,6 @@ fn coins(units: u64) -> String {
     format!("{}.{:08}", units / COIN, units % COIN)
 }
 
-fn block_json(raw: &[u8], height: Option<u32>, verbose: bool) -> Value {
-    let b = read_block(raw).unwrap();
-    let mut v = json!({
-        "hash": display_hash(&b.hash()),
-        "height": height,
-        "version": format!("{:08x}", b.header.version),
-        "prev": display_hash(&b.header.prev),
-        "merkle_root": hex(&b.header.merkle),
-        "time32": b.header.time32,
-        "bits": format!("{:08x}", b.header.bits),
-        "nonce": b.header.nonce,
-        "size": raw.len(),
-        "coinbase": {
-            "txid": hex(&b.coinbase.txid()),
-            "extra": hex(&b.coinbase.extra),
-            "utxo_root": hex(&b.coinbase.utxo_root),
-            "outputs": b.coinbase.outs.iter().map(|o| json!({"amount": coins(o.amount), "address": encode_address(&o.addr)})).collect::<Vec<_>>(),
-        },
-        "txs": b.txs.iter().map(|t| hex(&t.txid())).collect::<Vec<_>>(),
-    });
-    if verbose {
-        v["hex"] = json!(hex(raw));
-    }
-    v
-}
-
 /// A block hash as shown (reversed) or as raw bytes is accepted, or a height.
 fn find_block(n: &mut crate::node::Node, s: &str) -> Option<(Hash, u32)> {
     if let Ok(h) = s.parse::<u32>() {
@@ -127,20 +101,10 @@ pub fn call(h: &Handle, method: &str, p: &[Value]) -> Result<Value, String> {
                 "mempool_txs": n.pool.len(),
                 "mempool_sigs": n.pool.sigs,
                 "peers": n.peers.values().filter(|p| p.version.is_some()).count(),
-                "orphans": n.cs.orphan_count(),
                 "snapshots": n.cs.snapshots.keys().collect::<Vec<_>>(),
                 "base": n.cs.base,
                 "snapshot_sync": n.snap.as_ref().map(|s| json!({"height": s.height, "chunks": s.have(), "of": s.chunk_count()})),
             }))
-        }
-        "getpeers" => {
-            let n = h.lock();
-            Ok(json!(
-                n.peers
-                    .values()
-                    .map(|p| json!({"addr": p.addr.to_string(), "outbound": p.outbound, "height": p.version.map(|v| v.1)}))
-                    .collect::<Vec<_>>()
-            ))
         }
         "getblockhash" => {
             let n = h.lock();
@@ -151,10 +115,8 @@ pub fn call(h: &Handle, method: &str, p: &[Value]) -> Result<Value, String> {
             let mut n = h.lock();
             let (hash, height) = find_block(&mut n, &p_str(p, 0)?).ok_or("unknown block")?;
             let raw = n.cs.block_raw(&hash).ok_or("block not stored")?;
-            let active = n.cs.is_active(&hash);
-            let mut v = block_json(&raw, Some(height), true);
-            v["active"] = json!(active);
-            Ok(v)
+            let txs: Vec<String> = read_block(&raw).unwrap().txs.iter().map(|t| hex(&t.txid())).collect();
+            Ok(json!({"hash": display_hash(&hash), "height": height, "active": n.cs.is_active(&hash), "txs": txs, "hex": hex(&raw)}))
         }
         "submitblock" => {
             let raw = unhex(&p_str(p, 0)?).ok_or("not hex")?;
@@ -165,17 +127,9 @@ pub fn call(h: &Handle, method: &str, p: &[Value]) -> Result<Value, String> {
                 Err(e) => Err(e.to_string()),
             }
         }
-        "sendtx" => {
+        "sendrawtransaction" => {
             let raw = unhex(&p_str(p, 0)?).ok_or("not hex")?;
             h.submit_tx(&raw, None).map(|id| json!(hex(&id)))
-        }
-        "getmempool" => {
-            let n = h.lock();
-            let mut v: Vec<_> = n.pool.txs.values().collect();
-            v.sort_by_key(|e| e.seq);
-            Ok(json!(
-                v.iter().map(|e| json!({"txid": hex(&e.txid), "fee": coins(e.fee), "sigs": e.sigs, "size": e.size})).collect::<Vec<_>>()
-            ))
         }
         "getutxos" => {
             // Confirmed outputs of an address, with the ones the mempool already spends marked,
@@ -232,20 +186,6 @@ pub fn call(h: &Handle, method: &str, p: &[Value]) -> Result<Value, String> {
             let a = p_str(p, 0)?;
             h.lock().manual.push(a.clone());
             Ok(json!(a))
-        }
-        "getsnapshot" => {
-            let n = h.lock();
-            let height = p_u64(p, 0)? as u32;
-            let k = p_u64(p, 1)? as usize;
-            let s = n.cs.snapshots.get(&height).ok_or("no snapshot at that height")?;
-            let a = k * SNAPSHOT_CHUNK;
-            if a >= s.entries.len() {
-                return Err("no such chunk".into());
-            }
-            let b = (a + SNAPSHOT_CHUNK).min(s.entries.len());
-            Ok(json!({"height": height, "chunk": k, "total": s.entries.len(), "root": hex(&s.root),
-                "entries": s.entries[a..b].iter().map(|(k, e)| hex(&utxo_entry(k, e))).collect::<Vec<_>>(),
-                "proof": chunk_proof(&s.leaves, k).iter().map(|x| hex(x)).collect::<Vec<_>>()}))
         }
         "stop" => {
             h.stop();

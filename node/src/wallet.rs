@@ -161,23 +161,3 @@ impl Key {
         self.sk.try_sign_with_context(msg, &[], None).unwrap().to_vec()
     }
 }
-
-/// Fill in the witnesses: one per distinct input address, in order of first appearance.
-/// `input_addrs[i]` is the address that owns `tx.ins[i]`.
-pub fn sign_tx(tx: &mut crate::consensus::Tx, input_addrs: &[Hash], keys: &[&Key], chain_id: &Hash) -> std::result::Result<(), String> {
-    let mut want: Vec<Hash> = Vec::new();
-    for a in input_addrs {
-        if !want.contains(a) {
-            want.push(*a);
-        }
-    }
-    let msg = tx.sighash(chain_id);
-    tx.wits = want
-        .iter()
-        .map(|a| {
-            let k = keys.iter().find(|k| &k.addr == a).ok_or_else(|| format!("no key for address {}", encode_address(a)))?;
-            Ok(crate::consensus::Witness { pk: k.pk, sig: k.sign(&msg) })
-        })
-        .collect::<std::result::Result<_, String>>()?;
-    Ok(())
-}

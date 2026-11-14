@@ -16,7 +16,8 @@ This repository holds the consensus rules in two implementations, the test vecto
 | `bitaxe_sim.py` | Simulated Bitaxe, ported from the ESP-Miner firmware |
 | `test_stratum.py` | Full test: simulated miner ↔ server ↔ both implementations |
 | `cli.mjs` | Keys, addresses and signatures from the command line |
-| `node/` | Rust reference node: consensus, storage, reorgs, mempool, P2P, Stratum, wallet |
+| `node/` | Rust reference node (crate fable-node): consensus, storage, reorgs, mempool, P2P, snapshots |
+| `tools/` | Crate fable-tools: Stratum server and wallet payments over the node's control interface |
 
 ## Installation
 
@@ -34,8 +35,8 @@ python3 gen_vectors.py        # about 20 seconds
 node check_vectors.mjs
 python3 crosscheck.py 1       # the number is the random seed
 python3 test_stratum.py 40
-cd node && cargo test --release && cd ..
-(cd node && cargo test --release --test vectors -- --ignored)   # after crosscheck.py
+cargo build --release && cargo test --release
+cargo test --release --test vectors -- --ignored   # after crosscheck.py
 python3 node/tests/e2e.py
 python3 node/tests/e2e_snapshot.py
 ```
