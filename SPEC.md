@@ -1,4 +1,4 @@
-# Fable, specifica v0.11
+# Fable, specifica v0.12
 
 Chain proof-of-work che sposta coin da una chiave a un'altra. SHA-256 è l'unica primitiva crittografica e le regole sono congelate al genesis.
 L'implementazione di riferimento è `fable.py`. Se questo testo e il codice non coincidono, vale il codice e il testo va corretto.
@@ -18,8 +18,8 @@ L'implementazione di riferimento è `fable.py`. Se questo testo e il codice non 
 | Campo | Byte | Valori |
 | --- | --- | --- |
 | `n_in` | 1 | 1–32 |
-| per input: `prev_txid`, `prev_index` | 32 + 1 | indice 0–3 |
-| `n_out` | 1 | 1–4 |
+| per input: `prev_txid`, `prev_index` | 32 + 1 | indice 0–15 |
+| `n_out` | 1 | 1–16 |
 | per output: `importo`, `indirizzo` | 8 + 32 | importo 1–2^62 |
 | `n_wit` | 1 | 1–min(4, n_in) |
 | per testimone: chiave pubblica, firma | 32 + 7.856 | |
@@ -27,7 +27,7 @@ L'implementazione di riferimento è `fable.py`. Se questo testo e il codice non 
 - Il **corpo** è tutto fino agli output compresi. I **testimoni** sono `n_wit` seguito dalle coppie.
 - `txid = H(TX, corpo)`. Messaggio firmato: `H(SIG, chain_id ‖ corpo)`, uguale per tutti i testimoni.
 - Foglia Merkle: `H(LEAF, txid ‖ H(WIT, testimoni))`.
-- Dimensioni: 1 input e 2 output, 8.004 byte. 32 input da un indirizzo e 1 output, 8.987 byte. Massimo 32.771 byte.
+- Dimensioni: 1 input e 2 output, 8.004 byte. 32 input da un indirizzo e 1 output, 8.987 byte. Massimo 33.251 byte. Un pagamento a 15 destinatari più il resto, da un indirizzo, pesa 8.564 byte.
 
 **Regole**
 
@@ -52,7 +52,7 @@ L'implementazione di riferimento è `fable.py`. Se questo testo e il codice non 
 1. `prev_hash` è l'hash della punta; `bits` è il valore ASERT; `sha256d(header)`, letto come intero little-endian, è ≤ target.
 2. `merkle_root` corrisponde; `height` della coinbase è l'altezza del blocco.
 3. `utxo_root` è quello della sezione 6 nei blocchi di snapshot, 32 zeri negli altri.
-4. Al massimo 80 testimoni nel blocco, coinbase esclusa.
+4. Al massimo 80 testimoni nel blocco, coinbase esclusa (circa 0,64 MB con transazioni tipiche, 0,77 MB al massimo).
 5. Output della coinbase ≤ sussidio + fee. Incassare meno è ammesso: la differenza è bruciata.
 6. Nessun output nuovo può avere un `(txid, indice)` già presente.
 
@@ -108,6 +108,7 @@ L'implementazione di riferimento è `fable.py`. Se questo testo e il codice non 
 ## 10. Limiti noti
 
 - Nessuna difesa di protocollo contro il 51%.
-- Circa 1,3 transazioni al secondo con transazioni tipiche da 8 KB.
+- Circa 1,3 transazioni al secondo con transazioni tipiche da 8 KB; fino a 20 pagamenti al secondo se raggruppati, 15 destinatari per firma.
+- L'insieme UTXO può crescere fino a 1.280 output al minuto.
 - La storia prima di uno snapshot è garantita dal solo PoW.
 - Le regole sono congelate: un bug di consenso si corregge solo con un hard fork concordato.

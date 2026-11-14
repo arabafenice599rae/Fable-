@@ -1,4 +1,4 @@
-// Fable: second implementation of the consensus rules, spec v0.11.
+// Fable: second implementation of the consensus rules, spec v0.12.
 // Written separately from fable.py, in another language and on another SLH-DSA library,
 // so that the two can be run against each other.
 import { createHash, createHmac, pbkdf2Sync } from 'node:crypto';
@@ -9,7 +9,7 @@ export const COIN = 100000000n;
 const MAX_AMOUNT = 1n << 62n;
 const BLOCK_TIME = 60n, HALFLIFE = 3600n, FUTURE_LIMIT = 600;
 const QUARTER = 131400, SLOW_START = 43200, MATURITY = 100, SNAPSHOT_EVERY = 1440, MAX_SIGS = 80;
-const MAX_IN = 32, MAX_OUT = 4, MAX_WIT = 4, MAX_CB_OUT = 2;
+const MAX_IN = 32, MAX_OUT = 16, MAX_WIT = 4, MAX_CB_OUT = 2;
 const PK_LEN = 32, SIG_LEN = 7856;
 const ZERO32 = Buffer.alloc(32);
 
@@ -21,7 +21,7 @@ export const sha256d = (b) => sha256(sha256(b));
 export const H = (tag, b) => sha256(Buffer.concat([Buffer.from([tag]), b]));
 const u32 = (n) => { const b = Buffer.alloc(4); b.writeUInt32LE(n >>> 0); return b; };
 const u64 = (n) => { const b = Buffer.alloc(8); b.writeBigUInt64LE(n); return b; };
-const key = (txid, idx) => Buffer.from(txid).toString('hex') + String(idx);   // idx is one digit, 0-3: sorts like the raw bytes
+const key = (txid, idx) => Buffer.from(txid).toString('hex') + idx.toString(16);   // idx is one hex digit, 0-f: sorts like the raw bytes
 const leInt = (buf) => BigInt('0x' + Buffer.from(buf).reverse().toString('hex'));
 
 // ---------------------------------------------------------------- networks
@@ -175,7 +175,7 @@ export function utxoRoot(utxo) {
   const keys = [...utxo.keys()].sort();                // hex of txid, then index: the same order as the raw bytes
   return merkleRoot(keys.map((k) => {
     const e = utxo.get(k);
-    return H(TAG.UTXO, Buffer.concat([Buffer.from(k.slice(0, 64), 'hex'), Buffer.from([Number(k[64])]), u64(e.amount), e.addr, u32(e.height), Buffer.from([e.cb ? 1 : 0])]));
+    return H(TAG.UTXO, Buffer.concat([Buffer.from(k.slice(0, 64), 'hex'), Buffer.from([parseInt(k[64], 16)]), u64(e.amount), e.addr, u32(e.height), Buffer.from([e.cb ? 1 : 0])]));
   }));
 }
 
