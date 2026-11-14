@@ -1,54 +1,54 @@
-# Messaggi P2P del nodo Rust
+# P2P messages of the Rust node
 
-La specifica (sezione 9) fissa il frame e i nomi degli otto messaggi, non il loro contenuto.
-Questo è il formato che usa `node/src/p2p.rs`. È una proposta: se va bene, il testo può entrare nella specifica.
+The spec (section 9) fixes the frame and the names of the eight messages, not their contents.
+This is the format `node/src/p2p.rs` uses. It is a proposal: if it is accepted, the text can go into the spec.
 
-Tutti gli interi sono little-endian, gli hash nell'ordine dei byte di SHA-256, come nel resto della specifica.
+All integers are little-endian and hashes are in SHA-256 byte order, as in the rest of the spec.
 
 ## Frame
 
 ```
-lunghezza (4) ‖ tipo (1) ‖ contenuto
+length (4) ‖ type (1) ‖ content
 ```
 
-`lunghezza` conta i byte del solo contenuto. Contenuto massimo 2 MiB: un blocco arriva a circa 0,65 MB.
-Un messaggio che non si decodifica, o con un contenuto avanzato, chiude la connessione.
+`length` counts the content bytes only. Maximum content 2 MiB: a block reaches about 0.65 MB.
+A message that does not decode, or has bytes left over, closes the connection.
 
-| Tipo | Nome | Contenuto |
+| Type | Name | Content |
 | --- | --- | --- |
-| 0 | `hello` | `versione (4) ‖ chain_id (32) ‖ altezza (4) ‖ punta (32) ‖ porta (2) ‖ nonce (8)` |
-| 1 | `peers` | `n (2, ≤ 100) ‖ n × (IPv6 (16) ‖ porta (2))`; IPv4 come `::ffff:a.b.c.d`. `n = 0` chiede indirizzi |
-| 2 | `inv` | `tipo (1) ‖ n (2, ≤ 1.000) ‖ n × hash (32)`; tipo 1 = transazione (txid), 2 = blocco |
-| 3 | `get` | come `inv`; tipo 1 e 2 chiedono quegli oggetti, tipo 3 chiede gli header dopo un locator |
-| 4 | `tx` | la transazione serializzata |
-| 5 | `block` | il blocco serializzato |
-| 6 | `headers` | `n (2, ≤ 2.000) ‖ n × header (80)` |
-| 7 | `snap` | sottotipo (1) e campi, sotto |
+| 0 | `hello` | `version (4) ‖ chain_id (32) ‖ height (4) ‖ tip (32) ‖ port (2) ‖ nonce (8)` |
+| 1 | `peers` | `n (2, ≤ 100) ‖ n × (IPv6 (16) ‖ port (2))`; IPv4 as `::ffff:a.b.c.d`. `n = 0` asks for addresses |
+| 2 | `inv` | `kind (1) ‖ n (2, ≤ 1,000) ‖ n × hash (32)`; kind 1 = transaction (txid), 2 = block |
+| 3 | `get` | as `inv`; kinds 1 and 2 ask for those objects, kind 3 asks for the headers after a locator |
+| 4 | `tx` | the serialized transaction |
+| 5 | `block` | the serialized block |
+| 6 | `headers` | `n (2, ≤ 2,000) ‖ n × header (80)` |
+| 7 | `snap` | subtype (1) and fields, below |
 
-`versione` è 1. `porta` è quella su cui il nodo ascolta, 0 se non ascolta. `nonce` è casuale per processo e serve a riconoscere una connessione verso se stessi.
+`version` is 1. `port` is the one the node listens on, 0 if it does not listen. `nonce` is random per process and is used to detect a connection to oneself.
 
-## Scambio
+## Exchange
 
-1. Chi apre la connessione manda `hello`; l'altro risponde con il suo. Un `chain_id` diverso chiude la connessione, e prima di `hello` non vale nessun altro messaggio.
-2. Ciascuno chiede gli header (`get` tipo 3) con un locator: gli hash della propria catena attiva dalla punta all'indietro, i primi 10 uno per uno, poi con passo che raddoppia, e per ultimo il genesis.
-   La risposta contiene fino a 2.000 header della catena attiva dopo il primo hash del locator che chi risponde riconosce. Con 2.000 header se ne chiedono altri.
-3. Ogni header viene controllato rispetto al genitore (tempo, `bits` ASERT, proof of work) prima di entrare nell'indice. Un header che sbaglia `bits` o il proof of work chiude la connessione.
-4. Quando la catena di header migliore ha più lavoro della punta, il nodo chiede i blocchi mancanti (`get` tipo 2), al massimo 16 per peer e solo ai peer che li hanno annunciati. Una richiesta senza risposta in 30 secondi torna disponibile.
-5. Un blocco nuovo sulla catena attiva si annuncia con `inv` tipo 2 dell'hash della punta. Chi non lo conosce chiede gli header; poi il blocco.
-6. Una transazione accettata in mempool si annuncia con `inv` tipo 1. Dopo `hello` ciascuno annuncia la propria mempool.
+1. The side that opens the connection sends `hello`; the other answers with its own. A different `chain_id` closes the connection, and no other message is valid before `hello`.
+2. Each side asks for headers (`get` kind 3) with a locator: the hashes of its active chain from the tip backwards, the first 10 one by one, then with a doubling step, and the genesis last.
+   The reply holds up to 2,000 headers of the active chain after the first locator hash the replying side recognises. With 2,000 headers, more are requested.
+3. Every header is checked against its parent (time, ASERT `bits`, proof of work) before it enters the index. A header with wrong `bits` or proof of work closes the connection.
+4. When the best header chain has more work than the tip, the node asks for the missing blocks (`get` kind 2), at most 16 per peer and only from peers that announced them. A request with no answer within 30 seconds becomes available again.
+5. A new block on the active chain is announced with `inv` kind 2 of the tip hash. A node that does not know it asks for the headers, then the block.
+6. A transaction accepted into the mempool is announced with `inv` kind 1. After `hello` each side announces its mempool.
 
-## Snapshot (`snap`)
+## Snapshots (`snap`)
 
-| Sottotipo | Campi |
+| Subtype | Fields |
 | --- | --- |
-| 0 richiesta | `altezza (4) ‖ pezzo (4)` |
-| 1 pezzo | `altezza (4) ‖ pezzo (4) ‖ totale voci (4) ‖ n (2) ‖ n × voce UTXO (78) ‖ m (1) ‖ m × hash (32)` |
-| 2 non disponibile | `altezza (4) ‖ pezzo (4)` |
+| 0 request | `height (4) ‖ chunk (4)` |
+| 1 chunk | `height (4) ‖ chunk (4) ‖ total entries (4) ‖ n (2) ‖ n × UTXO entry (78) ‖ m (1) ‖ m × hash (32)` |
+| 2 not available | `height (4) ‖ chunk (4)` |
 
-`altezza` è un'altezza multipla di 1.440: lo snapshot è l'insieme che il blocco a quell'altezza impegna nel suo `utxo_root`, cioè quello dopo il blocco precedente.
-Il pezzo `k` contiene le voci da `4.096·k` a `4.096·k + 4.095`, nell'ordine `(txid, indice)`.
+`height` is a multiple of 1,440: the snapshot is the set the block at that height commits to in its `utxo_root`, that is the set after the previous block.
+Chunk `k` holds the entries from `4,096·k` to `4,096·k + 4,095`, in `(txid, index)` order.
 
-La prova sfrutta il fatto che 4.096 = 2^12: il pezzo `k` è il nodo all'indice `k` del livello 12 dell'albero di Merkle della sezione 6, e la sua radice è `merkle_root` delle sue foglie `H(UTXO, voce)`.
-La prova elenca i fratelli dal livello 12 alla radice, saltando i livelli in cui il nodo è spaiato e sale invariato.
-Per verificarla servono solo `k` e il totale delle voci: da questi si sa a ogni livello quanti nodi ci sono e quindi se il fratello esiste.
-Le funzioni sono `chunk_proof` e `chunk_root` in `node/src/consensus.rs`.
+The proof relies on 4,096 being 2^12: chunk `k` is the node at index `k` on level 12 of the section 6 Merkle tree, and its root is `merkle_root` of its leaves `H(UTXO, entry)`.
+The proof lists the siblings from level 12 up to the root, skipping the levels where the node is unpaired and moves up unchanged.
+Checking it needs only `k` and the total number of entries: from those, the number of nodes on every level is known, and so whether the sibling exists.
+The functions are `chunk_proof` and `chunk_root` in `node/src/consensus.rs`.
