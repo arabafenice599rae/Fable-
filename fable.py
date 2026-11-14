@@ -1,4 +1,4 @@
-"""Fable: reference implementation of the consensus rules, spec v0.11.
+"""Fable: reference implementation of the consensus rules, spec v0.12.
 
 Everything a node needs to decide whether a block is valid. No networking, no storage.
 The only dependency outside the standard library is an SLH-DSA verifier.
@@ -22,7 +22,7 @@ SLOW_START = 43_200               # blocks of linear ramp
 MATURITY = 100
 SNAPSHOT_EVERY = 1_440
 MAX_SIGS = 80                     # witnesses per block, coinbase excluded
-MAX_IN, MAX_OUT, MAX_WIT = 32, 4, 4   # per transaction
+MAX_IN, MAX_OUT, MAX_WIT = 32, 16, 4  # per transaction
 MAX_CB_OUT = 2
 PK_LEN, SIG_LEN = 32, 7_856
 ZERO32 = bytes(32)

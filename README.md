@@ -1,6 +1,6 @@
 # Fable
 
-Chain proof-of-work su SHA-256 con firme SLH-DSA. La specifica è in [`SPEC.md`](SPEC.md) (v0.11).
+Chain proof-of-work su SHA-256 con firme SLH-DSA. La specifica è in [`SPEC.md`](SPEC.md) (v0.12).
 
 Questo repository contiene le regole di consenso in due implementazioni, i vettori di test e un server Stratum. Il nodo completo in Rust non c'è ancora.
 

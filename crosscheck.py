@@ -72,7 +72,7 @@ def mutate(rng, raw):
 def blocks(rng, events):
     out = []
     c = F.Chain(F.TEST)
-    targets = {50: (60, 120), 104: (60, 300), 129: (60, 300), 1439: (40, 120)}  # height -> (raw mutations, mutations mined again)
+    targets = {50: (60, 120), 104: (60, 300), 129: (60, 300), 130: (40, 200), 1439: (40, 120)}  # height -> (raw mutations, mutations mined again)
     for e in events:
         if e['op'] != 'apply':
             continue
