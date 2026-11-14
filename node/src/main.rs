@@ -1,151 +1,110 @@
 //! `fable`: the reference node and its command-line tools.
 
-use std::net::SocketAddr;
 use std::path::PathBuf;
 use std::process::ExitCode;
 
-use clap::{Parser, Subcommand};
 use serde_json::{Value, json};
 
 use fable::consensus::*;
 use fable::node::{Config, Handle};
 use fable::wallet::{self, Key};
-use fable::{rpc, stratum, vectors};
+use fable::{rpc, stratum};
 use std::result::Result;
 
-#[derive(Parser)]
-#[command(name = "fable", version, about = "Fable reference node (spec v0.13)")]
-struct Cli {
-    #[command(subcommand)]
-    cmd: Cmd,
+const USAGE: &str = "fable, reference node for spec v0.13
+
+usage:
+  fable node [options]                 run a node
+    --net test|lab|main                  network (default test)
+    --genesis-time T                     genesis time for --net lab (default: first start)
+    --datadir DIR                        data directory (default ~/.fable/<net>; - keeps it in memory)
+    --listen ADDR|none                   P2P address (default 0.0.0.0:17171, 7171 for main)
+    --rpc ADDR                           control address (default 127.0.0.1:17172, 7172 for main)
+    --connect HOST:PORT                  peer to keep connected to (repeatable)
+    --stratum ADDR --payout fb1...       Stratum v1 server for miners
+    --share-diff D                       Stratum share difficulty (default min(256, network))
+    --min-chain-work HEX                 download blocks only above this much header work
+    --snapshot-sync                      start from the newest UTXO snapshot the peers serve
+    -v, --verbose
+  fable rpc [--rpc ADDR] METHOD [PARAMS...]
+  fable wallet new
+  fable wallet address --words W [--account A] [--index I] [--count N] [--passphrase P]
+  fable wallet balance --words W [--account A] [--count N] [--passphrase P] [--rpc ADDR]
+  fable wallet send --words W --to fb1... --amount COINS [--fee COINS] [--account A] [--count N]
+                    [--passphrase P] [--rpc ADDR] [--dry-run]
+The phrase can also be given in FABLE_WORDS.";
+
+/// Options without a value; every other `--name` takes the next argument (or `--name=value`).
+const FLAGS: &[&str] = &["verbose", "no-sigs", "snapshot-sync", "dry-run", "help"];
+
+struct Args {
+    pos: Vec<String>,
+    opts: Vec<(String, String)>,
 }
 
-#[derive(Subcommand)]
-enum Cmd {
-    /// Run a node.
-    Node(NodeArgs),
-    /// Call a method of a running node, e.g. `fable rpc getinfo`.
-    Rpc {
-        #[arg(long, default_value = "127.0.0.1:17172")]
-        rpc: String,
-        method: String,
-        params: Vec<String>,
-    },
-    /// Keys, addresses and payments.
-    Wallet {
-        #[command(subcommand)]
-        cmd: WalletCmd,
-    },
-    /// Check every vector in vectors.json.
-    Vectors {
-        #[arg(default_value = "vectors.json")]
-        path: PathBuf,
-    },
-    /// Compare with the cases crosscheck.py wrote (it leaves them in /tmp/fable_cross.json).
-    Crosscheck {
-        #[arg(default_value = "/tmp/fable_cross.json")]
-        cases: PathBuf,
-        #[arg(default_value = "vectors.json")]
-        vectors: PathBuf,
-    },
-}
+impl Args {
+    fn parse(it: impl Iterator<Item = String>) -> Result<Args, String> {
+        let (mut pos, mut opts) = (vec![], vec![]);
+        let mut it = it.peekable();
+        while let Some(a) = it.next() {
+            let name = match a.as_str() {
+                "-v" => "verbose".to_string(),
+                "-h" => "help".to_string(),
+                _ => match a.strip_prefix("--") {
+                    Some(n) => n.to_string(),
+                    None => {
+                        pos.push(a);
+                        continue;
+                    }
+                },
+            };
+            if let Some((n, v)) = name.split_once('=') {
+                opts.push((n.to_string(), v.to_string()));
+            } else if FLAGS.contains(&name.as_str()) {
+                opts.push((name, String::new()));
+            } else {
+                let v = it.next().ok_or_else(|| format!("--{name} needs a value"))?;
+                opts.push((name, v));
+            }
+        }
+        Ok(Args { pos, opts })
+    }
 
-#[derive(Parser)]
-struct NodeArgs {
-    /// test (trivial difficulty), lab (mainnet difficulty, throwaway genesis) or main
-    #[arg(long, default_value = "test")]
-    net: String,
-    /// Genesis time for --net lab; by default the time of the first start, kept in the data directory.
-    #[arg(long)]
-    genesis_time: Option<i64>,
-    /// Data directory (default ~/.fable/<net>). `-` keeps everything in memory.
-    #[arg(long)]
-    datadir: Option<String>,
-    /// P2P address to listen on (default 0.0.0.0:7171 main, 0.0.0.0:17171 otherwise). `none` to not listen.
-    #[arg(long)]
-    listen: Option<String>,
-    /// Local control address (default 127.0.0.1:7172 main, 127.0.0.1:17172 otherwise).
-    #[arg(long)]
-    rpc: Option<SocketAddr>,
-    /// Peer to keep connected to (repeatable).
-    #[arg(long)]
-    connect: Vec<String>,
-    /// Stratum v1 address for miners, e.g. 0.0.0.0:3333. Needs --payout.
-    #[arg(long)]
-    stratum: Option<SocketAddr>,
-    /// Address the Stratum server pays, fb1...
-    #[arg(long)]
-    payout: Option<String>,
-    /// Share difficulty for Stratum (default: min(256, network difficulty)).
-    #[arg(long)]
-    share_diff: Option<f64>,
-    /// Download blocks only once the header chain has this much work (hex).
-    #[arg(long)]
-    min_chain_work: Option<String>,
-    /// Do not verify signatures (only for replaying chains you trust).
-    #[arg(long, hide = true)]
-    no_sigs: bool,
-    /// Start from the newest UTXO snapshot the peers serve instead of from genesis.
-    #[arg(long)]
-    snapshot_sync: bool,
-    #[arg(long, short)]
-    verbose: bool,
-}
+    /// Refuse options the command does not know.
+    fn allow(&self, known: &[&str]) -> Result<(), String> {
+        match self.opts.iter().find(|(n, _)| !known.contains(&n.as_str()) && !FLAGS.contains(&n.as_str())) {
+            Some((n, _)) => Err(format!("unknown option --{n}\n\n{USAGE}")),
+            None => Ok(()),
+        }
+    }
 
-#[derive(Subcommand)]
-enum WalletCmd {
-    /// A new 24-word phrase.
-    New,
-    /// Addresses of a phrase.
-    Address {
-        #[arg(long, env = "FABLE_WORDS")]
-        words: String,
-        #[arg(long, default_value_t = 0)]
-        account: u32,
-        #[arg(long, default_value_t = 0)]
-        index: u32,
-        #[arg(long, default_value_t = 1)]
-        count: u32,
-        #[arg(long, default_value = "")]
-        passphrase: String,
-    },
-    /// Balance of the first `count` addresses, from a running node.
-    Balance {
-        #[arg(long, env = "FABLE_WORDS")]
-        words: String,
-        #[arg(long, default_value_t = 0)]
-        account: u32,
-        #[arg(long, default_value_t = 5)]
-        count: u32,
-        #[arg(long, default_value = "")]
-        passphrase: String,
-        #[arg(long, default_value = "127.0.0.1:17172")]
-        rpc: String,
-    },
-    /// Pay an address, with change back to index 0.
-    Send {
-        #[arg(long, env = "FABLE_WORDS")]
-        words: String,
-        #[arg(long)]
-        to: String,
-        /// In coins, e.g. 1.5
-        #[arg(long)]
-        amount: String,
-        /// In coins (default 0.001 per signature, the relay minimum)
-        #[arg(long)]
-        fee: Option<String>,
-        #[arg(long, default_value_t = 0)]
-        account: u32,
-        #[arg(long, default_value_t = 5)]
-        count: u32,
-        #[arg(long, default_value = "")]
-        passphrase: String,
-        #[arg(long, default_value = "127.0.0.1:17172")]
-        rpc: String,
-        /// Build and sign, print the transaction, do not send it.
-        #[arg(long)]
-        dry_run: bool,
-    },
+    fn get(&self, name: &str) -> Option<String> {
+        self.opts.iter().rev().find(|(n, _)| n == name).map(|(_, v)| v.clone())
+    }
+
+    fn all(&self, name: &str) -> Vec<String> {
+        self.opts.iter().filter(|(n, _)| n == name).map(|(_, v)| v.clone()).collect()
+    }
+
+    fn flag(&self, name: &str) -> bool {
+        self.opts.iter().any(|(n, _)| n == name)
+    }
+
+    fn num<T: std::str::FromStr>(&self, name: &str, default: T) -> Result<T, String> {
+        self.get(name).map_or(Ok(default), |v| v.parse().map_err(|_| format!("--{name}: not a number: {v}")))
+    }
+
+    fn parsed<T: std::str::FromStr>(&self, name: &str) -> Result<Option<T>, String> {
+        self.get(name).map(|v| v.parse().map_err(|_| format!("--{name}: cannot read {v}"))).transpose()
+    }
+
+    fn words(&self) -> Result<String, String> {
+        self.get("words").or_else(|| std::env::var("FABLE_WORDS").ok()).ok_or_else(|| "--words (or FABLE_WORDS) is needed".into())
+    }
+
+    fn rpc(&self) -> String {
+        self.get("rpc").unwrap_or_else(|| "127.0.0.1:17172".into())
+    }
 }
 
 fn parse_coins(s: &str) -> Result<u64, String> {
@@ -173,20 +132,22 @@ fn utxos(rpc_addr: &str, key: &Key) -> Result<Vec<Value>, String> {
     Ok(v.as_array().cloned().unwrap_or_default())
 }
 
-fn run_node(a: NodeArgs) -> Result<(), String> {
+fn run_node(a: &Args) -> Result<(), String> {
+    a.allow(&["net", "genesis-time", "datadir", "listen", "rpc", "connect", "stratum", "payout", "share-diff", "min-chain-work"])?;
+    let net_name = a.get("net").unwrap_or_else(|| "test".into());
     let default_dir = |name: &str| {
         std::env::var("HOME").map(|h| PathBuf::from(h).join(".fable").join(name)).unwrap_or_else(|_| PathBuf::from(".fable").join(name))
     };
-    let datadir = match a.datadir.as_deref() {
+    let datadir = match a.get("datadir").as_deref() {
         Some("-") => None,
         Some(d) => Some(PathBuf::from(d)),
-        None => Some(default_dir(&a.net)),
+        None => Some(default_dir(&net_name)),
     };
-    let net = match a.net.as_str() {
+    let net = match net_name.as_str() {
         "test" => Net::test(),
         "main" => Net::main(),
         "lab" => {
-            let t = match (a.genesis_time, &datadir) {
+            let t = match (a.parsed::<i64>("genesis-time")?, &datadir) {
                 (Some(t), _) => t,
                 (None, Some(d)) => {
                     std::fs::create_dir_all(d).map_err(|e| e.to_string())?;
@@ -205,26 +166,28 @@ fn run_node(a: NodeArgs) -> Result<(), String> {
     let main = net.name == "main";
     let mut cfg = Config::new(net);
     cfg.datadir = datadir;
-    cfg.listen = match a.listen.as_deref() {
+    cfg.listen = match a.get("listen").as_deref() {
         Some("none") => None,
         Some(s) => Some(s.parse().map_err(|_| format!("bad --listen {s}"))?),
         None => Some(if main { "0.0.0.0:7171" } else { "0.0.0.0:17171" }.parse().unwrap()),
     };
-    cfg.connect = a.connect;
-    cfg.verbose = a.verbose;
-    cfg.snapshot_sync = a.snapshot_sync;
-    if let Some(w) = a.min_chain_work {
+    cfg.connect = a.all("connect");
+    cfg.verbose = a.flag("verbose");
+    cfg.snapshot_sync = a.flag("snapshot-sync");
+    if let Some(w) = a.get("min-chain-work") {
         cfg.min_chain_work = num_bigint::BigUint::parse_bytes(w.trim_start_matches("0x").as_bytes(), 16).ok_or("bad --min-chain-work")?;
     }
-    let payout = match &a.payout {
+    let payout = match &a.get("payout") {
         Some(p) => Some(wallet::parse_address(p).ok_or("--payout is not a Fable address")?),
         None => None,
     };
     let h = Handle::start(cfg).map_err(|e| format!("cannot start: {e}"))?;
-    if a.no_sigs {
+    if a.flag("no-sigs") {
         h.lock().cs.verify_sigs = false;
     }
-    let rpc_addr = a.rpc.unwrap_or_else(|| if main { "127.0.0.1:7172" } else { "127.0.0.1:17172" }.parse().unwrap());
+    let rpc_addr = a
+        .parsed::<std::net::SocketAddr>("rpc")?
+        .unwrap_or_else(|| if main { "127.0.0.1:7172" } else { "127.0.0.1:17172" }.parse().unwrap());
     let rpc_local = rpc::serve(h.clone(), rpc_addr).map_err(|e| format!("rpc on {rpc_addr}: {e}"))?;
     {
         let n = h.lock();
@@ -237,10 +200,10 @@ fn run_node(a: NodeArgs) -> Result<(), String> {
             rpc_local
         );
     }
-    if let Some(addr) = a.stratum {
+    if let Some(addr) = a.parsed::<std::net::SocketAddr>("stratum")? {
         let payout = payout.ok_or("--stratum needs --payout")?;
-        let (srv, local) =
-            stratum::Server::start(h.clone(), payout, addr, a.share_diff, true).map_err(|e| format!("stratum on {addr}: {e}"))?;
+        let (srv, local) = stratum::Server::start(h.clone(), payout, addr, a.parsed("share-diff")?, true)
+            .map_err(|e| format!("stratum on {addr}: {e}"))?;
         eprintln!("stratum on {local}, share difficulty {}, paying {}", srv.share_diff(), wallet::encode_address(&payout));
     }
     let mut g = 0;
@@ -253,14 +216,17 @@ fn run_node(a: NodeArgs) -> Result<(), String> {
     }
 }
 
-fn wallet_cmd(cmd: WalletCmd) -> Result<(), String> {
-    match cmd {
-        WalletCmd::New => {
+fn wallet_cmd(a: &Args) -> Result<(), String> {
+    let (account, passphrase, rpc) = (a.num("account", 0u32)?, a.get("passphrase").unwrap_or_default(), a.rpc());
+    match a.pos.get(1).map(String::as_str) {
+        Some("new") => {
             let words = wallet::new_mnemonic();
             let k = keys(&words, "", 0, 1)?;
             println!("{}", json!({"words": words, "address": wallet::encode_address(&k[0].addr)}));
         }
-        WalletCmd::Address { words, account, index, count, passphrase } => {
+        Some("address") => {
+            a.allow(&["words", "account", "index", "count", "passphrase"])?;
+            let (words, index, count) = (a.words()?, a.num("index", 0u32)?, a.num("count", 1u32)?);
             wallet::check_mnemonic(&words)?;
             let seed = wallet::seed_from_mnemonic(&words, &passphrase);
             for i in index..index + count {
@@ -271,7 +237,9 @@ fn wallet_cmd(cmd: WalletCmd) -> Result<(), String> {
                 );
             }
         }
-        WalletCmd::Balance { words, account, count, passphrase, rpc } => {
+        Some("balance") => {
+            a.allow(&["words", "account", "count", "passphrase", "rpc"])?;
+            let (words, count) = (a.words()?, a.num("count", 5u32)?);
             let mut total = (0u64, 0u64);
             for (i, k) in keys(&words, &passphrase, account, count)?.iter().enumerate() {
                 let (mut spendable, mut other) = (0u64, 0u64);
@@ -292,7 +260,11 @@ fn wallet_cmd(cmd: WalletCmd) -> Result<(), String> {
             }
             println!("{}", json!({"spendable": coins(total.0), "pending_or_immature": coins(total.1)}));
         }
-        WalletCmd::Send { words, to, amount, fee, account, count, passphrase, rpc, dry_run } => {
+        Some("send") => {
+            a.allow(&["words", "to", "amount", "fee", "account", "count", "passphrase", "rpc"])?;
+            let (words, count, fee) = (a.words()?, a.num("count", 5u32)?, a.get("fee"));
+            let to = a.get("to").ok_or("--to is needed")?;
+            let amount = a.get("amount").ok_or("--amount is needed")?;
             let dest = wallet::parse_address(&to).ok_or("--to is not a Fable address")?;
             let amount = parse_coins(&amount)?;
             let ks = keys(&words, &passphrase, account, count)?;
@@ -350,55 +322,36 @@ fn wallet_cmd(cmd: WalletCmd) -> Result<(), String> {
             let refs: Vec<&Key> = ks.iter().collect();
             wallet::sign_tx(&mut tx, &addrs, &refs, &chain_id)?;
             let raw = tx.serialize();
-            if dry_run {
+            if a.flag("dry-run") {
                 println!("{}", json!({"txid": hex(&tx.txid()), "fee": coins(fee), "size": raw.len(), "hex": hex(&raw)}));
             } else {
                 let id = rpc::request(&rpc, "sendtx", json!([hex(&raw)]))?;
                 println!("{}", json!({"txid": id, "fee": coins(fee), "size": raw.len()}));
             }
         }
+        _ => return Err(USAGE.into()),
     }
     Ok(())
 }
 
 fn main() -> ExitCode {
-    let cli = Cli::parse();
-    let r: Result<(), String> = match cli.cmd {
-        Cmd::Node(a) => run_node(a),
-        Cmd::Rpc { rpc, method, params } => {
-            let params: Vec<Value> = params.into_iter().map(Value::String).collect();
-            rpc::request(&rpc, &method, json!(params)).map(|v| println!("{}", serde_json::to_string_pretty(&v).unwrap()))
+    let r = Args::parse(std::env::args().skip(1)).and_then(|a| {
+        if a.flag("help") {
+            println!("{USAGE}");
+            return Ok(());
         }
-        Cmd::Wallet { cmd } => wallet_cmd(cmd),
-        Cmd::Vectors { path } => (|| {
-            let v: Value = serde_json::from_str(&std::fs::read_to_string(&path).map_err(|e| format!("{}: {e}", path.display()))?)
-                .map_err(|e| e.to_string())?;
-            let r = vectors::run(&v);
-            println!(
-                "spec {}: {} checks passed, {} failed ({} blocks applied, {} invalid blocks refused with the expected code)",
-                v["spec"].as_str().unwrap_or("?"),
-                r.pass,
-                r.fails.len(),
-                r.applied,
-                r.rejected
-            );
-            for f in r.fails.iter().take(20) {
-                println!("  FAIL {f}");
+        match a.pos.first().map(String::as_str) {
+            Some("node") => run_node(&a),
+            Some("wallet") => wallet_cmd(&a),
+            Some("rpc") => {
+                a.allow(&["rpc"])?;
+                let method = a.pos.get(1).ok_or("rpc needs a method, e.g. fable rpc getinfo")?;
+                let params: Vec<Value> = a.pos[2..].iter().cloned().map(Value::String).collect();
+                rpc::request(&a.rpc(), method, json!(params)).map(|v| println!("{}", serde_json::to_string_pretty(&v).unwrap()))
             }
-            if r.fails.is_empty() { Ok(()) } else { Err("vectors failed".into()) }
-        })(),
-        Cmd::Crosscheck { cases, vectors: vp } => (|| {
-            let d: Value = serde_json::from_str(&std::fs::read_to_string(&cases).map_err(|e| format!("{}: {e}", cases.display()))?)
-                .map_err(|e| e.to_string())?;
-            let v: Value = serde_json::from_str(&std::fs::read_to_string(&vp).map_err(|e| e.to_string())?).map_err(|e| e.to_string())?;
-            let r = vectors::crosscheck(&d, &v);
-            println!("compared {} cases ({} mutated blocks): {} disagreements", r.pass + r.fails.len(), r.rejected, r.fails.len());
-            for f in r.fails.iter().take(15) {
-                println!("  {f}");
-            }
-            if r.fails.is_empty() { Ok(()) } else { Err("the implementations disagree".into()) }
-        })(),
-    };
+            _ => Err(USAGE.into()),
+        }
+    });
     match r {
         Ok(()) => ExitCode::SUCCESS,
         Err(e) => {
