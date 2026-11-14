@@ -8,5 +8,4 @@ pub mod p2p;
 pub mod rpc;
 pub mod snapsync;
 pub mod stratum;
-pub mod vectors;
 pub mod wallet;

@@ -35,7 +35,7 @@ node check_vectors.mjs
 python3 crosscheck.py 1       # the number is the random seed
 python3 test_stratum.py 40
 cd node && cargo test --release && cd ..
-node/target/release/fable crosscheck   # after crosscheck.py
+(cd node && cargo test --release --test vectors -- --ignored)   # after crosscheck.py
 python3 node/tests/e2e.py
 python3 node/tests/e2e_snapshot.py
 ```

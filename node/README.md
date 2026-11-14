@@ -14,8 +14,8 @@ cargo test --release
 | Command | What it checks |
 | --- | --- |
 | `cargo test --release` | Every vector in `../vectors.json`, the same chain fed through the block tree, reorgs, mempool, the block file, snapshot chunk proofs, message encoding |
-| `./target/release/fable vectors ../vectors.json` | The vectors, with the same summary as `check_vectors.mjs` |
-| `python3 crosscheck.py 1 && node/target/release/fable crosscheck` | The `crosscheck.py` differential test (from the repository root) |
+| `cargo test --release --test vectors -- --nocapture` | The vectors alone, with a summary |
+| `python3 crosscheck.py 1`, then `cargo test --release --test vectors -- --ignored` | The `crosscheck.py` differential test: the first from the repository root, the second compares with `/tmp/fable_cross.json` (or `FABLE_CROSS`) |
 | `python3 node/tests/e2e.py` | Three nodes over real sockets, the simulated Bitaxe, a payment, a reorg, a restart, replay on `fable.py` and `fable.mjs` |
 | `python3 node/tests/e2e_snapshot.py` | Starting from a UTXO snapshot between nodes |
 | `cargo run --release --example bench` | Signature verification speed |
