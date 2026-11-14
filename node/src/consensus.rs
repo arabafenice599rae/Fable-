@@ -1,4 +1,4 @@
-//! Consensus rules, spec v0.11. A line-by-line port of `fable.py`.
+//! Consensus rules, spec v0.13. A line-by-line port of `fable.py`.
 //!
 //! Every check happens in the same order as in the reference and fails with the same short
 //! code, so `verdict()` gives exactly the strings `fable.py` gives.
@@ -27,9 +27,12 @@ pub const SLOW_START: u64 = 43_200;
 pub const MATURITY: u32 = 100;
 pub const SNAPSHOT_EVERY: u32 = 1_440;
 pub const SNAPSHOT_CHUNK: usize = 4_096;
-pub const MAX_SIGS: usize = 80;
+/// Witnesses per block, coinbase excluded: 80 at first, +40% every 2,102,400 blocks, up to 2,048.
+pub const SIGS_START: usize = 80;
+pub const SIGS_STEP: u64 = 2_102_400;
+pub const SIGS_CAP: usize = 2_048;
 pub const MAX_IN: usize = 32;
-pub const MAX_OUT: usize = 4;
+pub const MAX_OUT: usize = 16;
 pub const MAX_WIT: usize = 4;
 pub const MAX_CB_OUT: usize = 2;
 pub const PK_LEN: usize = 32;
@@ -253,6 +256,18 @@ pub fn subsidy(height: u64) -> u64 {
         r = r * height / SLOW_START;
     }
     r
+}
+
+/// Witnesses allowed in the block at this height, coinbase excluded.
+pub fn max_sigs(height: u64) -> usize {
+    let mut s = SIGS_START;
+    for _ in 0..height / SIGS_STEP {
+        s += s * 2 / 5;
+        if s >= SIGS_CAP {
+            return SIGS_CAP;
+        }
+    }
+    s
 }
 
 // ---------------------------------------------------------------- time
@@ -527,7 +542,7 @@ impl Block {
     pub fn serialize(&self) -> Vec<u8> {
         let mut b = self.header.serialize().to_vec();
         b.extend(self.coinbase.serialize());
-        b.push(self.txs.len() as u8);
+        b.extend_from_slice(&(self.txs.len() as u16).to_le_bytes());
         for t in &self.txs {
             b.extend(t.serialize());
         }
@@ -549,8 +564,8 @@ pub fn read_block(buf: &[u8]) -> Result<Block> {
     let mut r = Reader::new(buf);
     let header = Header::parse(r.take(80)?);
     let coinbase = read_coinbase(&mut r)?;
-    let n = r.u8()? as usize;
-    if n > MAX_SIGS {
+    let n = r.u16()? as usize;
+    if n > SIGS_CAP {
         return bad("parse");
     }
     let mut txs = Vec::with_capacity(n);
@@ -746,7 +761,7 @@ impl Chain {
         if blk.coinbase.utxo_root != want_root {
             return bad("utxoroot");
         }
-        if blk.txs.iter().map(|t| t.wits.len()).sum::<usize>() > MAX_SIGS {
+        if blk.txs.iter().map(|t| t.wits.len()).sum::<usize>() > max_sigs(h as u64) {
             return bad("sigs");
         }
 

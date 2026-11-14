@@ -10,6 +10,6 @@ fn all_vectors() {
         eprintln!("FAIL {f}");
     }
     assert!(r.fails.is_empty(), "{} failures", r.fails.len());
-    assert_eq!((r.applied, r.rejected), (1445, 29));
+    assert_eq!((r.applied, r.rejected), (1445, 30));
     eprintln!("{} checks passed", r.pass);
 }

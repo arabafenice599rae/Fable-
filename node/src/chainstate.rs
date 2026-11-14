@@ -397,7 +397,7 @@ impl ChainState {
             self.mark_invalid(hash);
             return Err(Invalid("cbheight"));
         }
-        if blk.txs.iter().map(|t| t.wits.len()).sum::<usize>() > MAX_SIGS {
+        if blk.txs.iter().map(|t| t.wits.len()).sum::<usize>() > max_sigs(height as u64) {
             self.mark_invalid(hash);
             return Err(Invalid("sigs"));
         }

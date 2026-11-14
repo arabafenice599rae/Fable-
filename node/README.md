@@ -1,6 +1,6 @@
 # Rust reference node
 
-A full node for Fable, spec v0.11. The consensus code (`src/consensus.rs`) is a line-by-line port of `fable.py`: the same checks, in the same order, with the same error codes.
+A full node for Fable, spec v0.13. The consensus code (`src/consensus.rs`) is a line-by-line port of `fable.py`: the same checks, in the same order, with the same error codes.
 Signatures use a third SLH-DSA library, RustCrypto's `slh-dsa` (pinned to `=0.2.0-rc.5`), different from the Python and JavaScript ones.
 
 ```
@@ -20,8 +20,8 @@ cargo test --release
 | `python3 node/tests/e2e_snapshot.py` | Starting from a UTXO snapshot between nodes |
 | `cargo run --release --example bench` | Signature verification speed |
 
-Current state: 1,732 checks on the vectors and 37,660 differential cases per seed (seeds 1, 2 and 3), all matching the reference.
-One signature verifies in about 0.15 ms; a block's signatures are verified in parallel, a full block of 80 in about 4 ms on 4 cores.
+Current state: 1,755 checks on the vectors (30 invalid blocks refused with the expected code) and 39,900 differential cases per seed (seeds 1, 2 and 3), all matching the reference.
+One signature verifies in about 0.15 ms; a block's signatures are verified in parallel, a full block of 80 in about 4 ms on 4 cores (at the 2,048 cap, about 0.1 s).
 
 ## Usage
 

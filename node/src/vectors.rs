@@ -69,6 +69,9 @@ pub fn run(v: &Value) -> Report {
     for c in u["subsidy"].as_array().unwrap() {
         r.eq("subsidy", subsidy(n(&c["height"]) as u64), s(&c["units"]), n(&c["height"]));
     }
+    for c in u["max_sigs"].as_array().unwrap() {
+        r.eq("max sigs", max_sigs(n(&c["height"]) as u64), n(&c["sigs"]), n(&c["height"]));
+    }
     for c in u["time"].as_array().unwrap() {
         r.eq("time", full_time(n(&c["prev"]), n(&c["time32"]) as u32), n(&c["full"]), n(&c["prev"]));
     }
@@ -175,6 +178,9 @@ pub fn crosscheck(d: &Value, v: &Value) -> Report {
         let t = num_bigint::BigUint::parse_bytes(s(&c[0]).trim_start_matches("0x").as_bytes(), 16).unwrap();
         r.eq("bits", target_to_bits(&t), n(&c[1]), s(&c[0]));
         r.eq("bits", target_hex(&bits_to_target(n(&c[1]) as u32).unwrap()), s(&c[2]), &c[1]);
+    }
+    for c in nm["max_sigs"].as_array().unwrap() {
+        r.eq("max sigs", max_sigs(n(&c[0]) as u64), n(&c[1]), &c[0]);
     }
     for c in nm["subsidy"].as_array().unwrap() {
         r.eq("subsidy", subsidy(n(&c[0]) as u64), s(&c[1]), &c[0]);

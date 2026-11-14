@@ -50,7 +50,7 @@ impl Template {
 pub fn template(cs: &ChainState, pool: &Mempool, payout: Hash, now: i64) -> Template {
     let st = &cs.state;
     let height = st.height + 1;
-    let (txs, fees) = pool.select(MAX_SIGS);
+    let (txs, fees) = pool.select(max_sigs(height as u64));
     let utxo_root = st.next_utxo_root();
     Template {
         height,

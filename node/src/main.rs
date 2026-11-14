@@ -14,7 +14,7 @@ use fable::{rpc, stratum, vectors};
 use std::result::Result;
 
 #[derive(Parser)]
-#[command(name = "fable", version, about = "Fable reference node (spec v0.11)")]
+#[command(name = "fable", version, about = "Fable reference node (spec v0.13)")]
 struct Cli {
     #[command(subcommand)]
     cmd: Cmd,
