@@ -1,11 +1,15 @@
 # Rust reference node
 
+Two crates in one Cargo workspace at the repository root:
+
+- **fable-node** (`node/`): the full node, its control interface and the key tools of the wallet standard. Binary `fable`.
+- **fable-tools** (`tools/`): programs that work only through the node's control interface: a Stratum v1 server and wallet payments. Binary `fable-tools`.
+
 A full node for Fable, spec v0.13. The consensus code (`src/consensus.rs`) is a line-by-line port of `fable.py`: the same checks, in the same order, with the same error codes.
 Signatures use a third SLH-DSA library, RustCrypto's `slh-dsa` (pinned to `=0.2.0-rc.5`), different from the Python and JavaScript ones.
 
 ```
-cd node
-cargo build --release
+cargo build --release        # from the repository root; binaries in target/release
 cargo test --release
 ```
 
@@ -13,10 +17,10 @@ cargo test --release
 
 | Command | What it checks |
 | --- | --- |
-| `cargo test --release` | Every vector in `../vectors.json`, the same chain fed through the block tree, reorgs, mempool, the block file, snapshot chunk proofs, message encoding |
+| `cargo test --release` (from the root) | Every vector in `../vectors.json`, the same chain fed through the block tree, reorgs, mempool, the block file, snapshot chunk proofs, message encoding |
 | `cargo test --release --test vectors -- --nocapture` | The vectors alone, with a summary |
 | `python3 crosscheck.py 1`, then `cargo test --release --test vectors -- --ignored` | The `crosscheck.py` differential test: the first from the repository root, the second compares with `/tmp/fable_cross.json` (or `FABLE_CROSS`) |
-| `python3 node/tests/e2e.py` | Three nodes over real sockets, the simulated Bitaxe, a payment, a reorg, a restart, replay on `fable.py` and `fable.mjs` |
+| `python3 node/tests/e2e.py` | Three nodes over real sockets, a payment with `fable-tools wallet send`, the simulated Bitaxe on `fable-tools stratum`, a reorg, a restart, replay on `fable.py` and `fable.mjs` |
 | `python3 node/tests/e2e_snapshot.py` | Starting from a UTXO snapshot between nodes |
 | `cargo run --release --example bench` | Signature verification speed |
 
@@ -28,33 +32,36 @@ One signature verifies in about 0.15 ms; a block's signatures are verified in pa
 ```
 fable node --net test -v                                      # test network, data in ~/.fable/test
 fable node --net test --connect 10.0.0.2:17171                # with a fixed peer
-fable node --net lab --stratum 0.0.0.0:3333 --payout fb1...   # for a real Bitaxe, like stratum.py
 fable node --net test --snapshot-sync --connect ...           # start from the latest UTXO snapshot
 fable rpc getinfo
 fable rpc generate 10 fb1...                                  # CPU mining, for the test network
 fable wallet new
 fable wallet address --words "<24 words>" --count 3
-fable wallet balance --words "<24 words>"
-fable wallet send --words "<24 words>" --to fb1... --amount 1.5
+
+fable-tools stratum --payout fb1... --listen 0.0.0.0:3333      # miners connect here; jobs come from the node
+fable-tools wallet balance --words "<24 words>"
+fable-tools wallet send --words "<24 words>" --to fb1... --amount 1.5
 ```
 
 Default ports: P2P 17171 and control 17172 (7171 and 7172 for `main`). The phrase can also be given in `FABLE_WORDS`.
 The control interface is line-delimited JSON with no authentication: keep it on `127.0.0.1`.
-Methods: `getinfo`, `getpeers`, `getblockhash`, `getblock`, `submitblock`, `sendtx`, `getmempool`, `getutxos`, `gettemplate`, `generate`, `addpeer`, `getsnapshot`, `stop`.
+Methods: `getinfo`, `getblockhash`, `getblock`, `submitblock`, `sendrawtransaction`, `getutxos`, `gettemplate`, `generate`, `addpeer`, `stop`.
+`fable-tools` uses only `gettemplate`, `submitblock` (Stratum), `getinfo`, `getutxos` and `sendrawtransaction` (wallet).
 
 ## How it is built
 
 | File | What it does |
 | --- | --- |
 | `src/consensus.rs` | Consensus rules, ported from `fable.py`; Merkle proofs for snapshot chunks |
-| `src/wallet.rs` | BIP39 phrase, key derivation, Bech32m, transaction signing (section 7) |
+| `src/wallet.rs` | BIP39 phrase, key derivation, Bech32m (section 7) |
 | `src/chainstate.rs` | Header and block index, chain selection, reorgs, block file, snapshots |
 | `src/mempool.rs` | The section 8 policy and transaction selection for blocks |
 | `src/miner.rs` | Block templates and a CPU miner |
 | `src/p2p.rs`, `src/node.rs` | P2P messages and the running node; the message format is in [`PROTOCOL.md`](PROTOCOL.md) |
 | `src/snapsync.rs` | Collecting and checking the chunks of a snapshot |
-| `src/stratum.rs` | Stratum v1 server, ported from `stratum.py` |
-| `src/rpc.rs`, `src/main.rs` | Control interface and command line |
+| `src/rpc.rs`, `src/cli.rs`, `src/main.rs` | Control interface, command-line parser (shared with fable-tools), command line |
+| `tools/src/stratum.rs` | Stratum v1 server, ported from `stratum.py`, on `gettemplate` and `submitblock` |
+| `tools/src/wallet.rs` | Balance and payments: coin selection, signing, `sendrawtransaction` |
 
 - **Chain selection.** Every header that passes the parent-relative checks (time, ASERT `bits`, proof of work) enters the index, even before its block arrives.
   The chain with the most work among those that can be connected wins; on a tie the one seen first stays.
@@ -62,7 +69,7 @@ Methods: `getinfo`, `getpeers`, `getblockhash`, `getblock`, `submitblock`, `send
   A block with a wrong Merkle root does not invalidate its header, because the body may have been altered in transit.
 - **Error codes.** A block's signatures are collected and verified together at the end. An error found later in the block is reported only if every signature the reference would have checked before it is valid, so the code stays the one `fable.py` gives.
 - **Mempool.** Minimum fee 0.001 coin per signature and minimum output 0.001 coin; a cap of 5,000 signatures, the lowest fee per signature leaves first; a replacement must pay more than the total it replaces (descendants included) and more per signature than every transaction it conflicts with; at most 64 linked unconfirmed transactions. After a reorg, the transactions of the disconnected blocks go back into the mempool. Signatures already verified are not verified again.
-- **Stratum.** Like `stratum.py`, but jobs include the mempool's transactions, so the Merkle branch is not empty. A new job on every new tip and every 30 seconds.
+- **Stratum (fable-tools).** Like `stratum.py`, but jobs come from the node's `gettemplate`, so they include the mempool's transactions and the Merkle branch is not empty. The server polls the node twice a second: a new job on every new tip and every 30 seconds; found blocks go back with `submitblock`.
 - **Snapshots.** The node keeps the last two UTXO sets committed by a snapshot block and serves them in chunks of 4,096 entries, each with its proof against `utxo_root`.
   With `--snapshot-sync` a new node downloads the headers, the snapshot block, the chunks (each one checked) and then only the blocks after it. It cannot reorganise below the snapshot.
 - **Peers.** At most 8 outbound, one per /16 network; peers given with `--connect` are always kept. Blocks are requested only from peers that announced them.
@@ -73,5 +80,5 @@ Methods: `getinfo`, `getpeers`, `getblockhash`, `getblock`, `submitblock`, `send
 - No pruning: the node keeps every block it received. The spec allows pruning but does not require it.
 - The P2P message format is not in the spec: `PROTOCOL.md` is a proposal.
 - `MAIN` still has the placeholder genesis `prev_hash` and no seeds in the binary.
-- Minimal network defences: disconnection for invalid messages or headers, an orphan pool capped at 256, a work threshold for downloading blocks (`--min-chain-work`, 0 by default). No misbehaviour scoring.
+- Minimal network defences: disconnection for invalid messages or headers, no pool for blocks whose parent is unknown (the node asks for headers instead), a work threshold for downloading blocks (`--min-chain-work`, 0 by default). No misbehaviour scoring.
 - Snapshot sync is tested over the network with a single chunk (1,439 entries); several chunks are covered by the unit tests.

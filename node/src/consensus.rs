@@ -170,11 +170,6 @@ impl Net {
         Net::new("test", 1_794_441_600, 0x207F_FFFF, 0x207F_FFFF, ZERO32)
     }
 
-    /// LAB (as in `stratum.py`): mainnet difficulty, throwaway genesis stamped at first start.
-    pub fn lab(genesis_time: i64) -> Net {
-        Net::new("lab", genesis_time, 0x1B04_0000, 0x1D00_FFFF, ZERO32)
-    }
-
     pub fn genesis_hash(&self) -> Hash {
         self.genesis.hash()
     }

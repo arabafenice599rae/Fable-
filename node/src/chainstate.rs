@@ -6,7 +6,7 @@
 //! on a tie the one seen first stays. Switching chains disconnects blocks with their undo data and
 //! connects the new ones with the full rules of `consensus::Chain`.
 
-use std::collections::{BTreeMap, HashMap, HashSet};
+use std::collections::{BTreeMap, HashMap};
 use std::fs::{File, OpenOptions};
 use std::io::{Read, Seek, SeekFrom, Write};
 use std::path::Path;
@@ -19,7 +19,6 @@ use crate::consensus::*;
 /// Far enough in the future that the clock rule never fires: used when a header's time was
 /// already checked on arrival, and when replaying our own block file.
 pub const NO_CLOCK: i64 = i64::MAX / 4;
-const MAX_ORPHANS: usize = 256;
 
 #[derive(Clone, Debug)]
 pub struct Entry {
@@ -41,7 +40,7 @@ pub enum Accepted {
     /// New block stored (it may or may not have become the tip).
     Stored,
     Duplicate,
-    /// The parent is unknown; the block waits in the orphan pool.
+    /// The parent is unknown: nothing is stored, the caller asks for headers.
     Orphan,
 }
 
@@ -148,7 +147,6 @@ pub struct ChainState {
     store: BlockStore,
     seq: u64,
     pub best_header: Hash,
-    orphans: HashMap<Hash, (Hash, Vec<u8>)>, // hash -> (prev, raw)
     pub snapshots: BTreeMap<u32, Arc<Snapshot>>,
     pub verify_sigs: bool,
     last_error: Option<Invalid>,
@@ -180,7 +178,6 @@ impl ChainState {
             store,
             seq: 1,
             best_header: g,
-            orphans: HashMap::new(),
             snapshots: BTreeMap::new(),
             verify_sigs: true,
             last_error: None,
@@ -356,19 +353,6 @@ impl ChainState {
     pub fn accept_block(&mut self, raw: &[u8], now: i64) -> (Result<Accepted>, Changes) {
         let mut changes = Changes::default();
         let r = self.accept_one(raw, now, &mut changes);
-        if r == Ok(Accepted::Stored) {
-            // blocks that were waiting for this one
-            let mut queue = vec![read_block(raw).unwrap().hash()];
-            while let Some(parent) = queue.pop() {
-                let ready: Vec<Hash> = self.orphans.iter().filter(|(_, (p, _))| *p == parent).map(|(h, _)| *h).collect();
-                for h in ready {
-                    let (_, oraw) = self.orphans.remove(&h).unwrap();
-                    if self.accept_one(&oraw, now, &mut changes) == Ok(Accepted::Stored) {
-                        queue.push(h);
-                    }
-                }
-            }
-        }
         (r, changes)
     }
 
@@ -379,11 +363,6 @@ impl ChainState {
             return Ok(Accepted::Duplicate);
         }
         if !self.index.contains_key(&blk.header.prev) {
-            if self.orphans.len() >= MAX_ORPHANS {
-                let k = *self.orphans.keys().next().unwrap();
-                self.orphans.remove(&k);
-            }
-            self.orphans.insert(hash, (blk.header.prev, raw.to_vec()));
             return Ok(Accepted::Orphan);
         }
         self.accept_header(&blk.header, now)?;
@@ -575,13 +554,5 @@ impl ChainState {
         out.reverse();
         out.truncate(max);
         out
-    }
-
-    pub fn orphan_count(&self) -> usize {
-        self.orphans.len()
-    }
-
-    pub fn orphan_parents(&self) -> HashSet<Hash> {
-        self.orphans.values().map(|(p, _)| *p).filter(|p| !self.index.contains_key(p)).collect()
     }
 }

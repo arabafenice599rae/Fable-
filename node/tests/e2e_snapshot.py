@@ -1,5 +1,5 @@
 """Starting from a UTXO snapshot (spec 6) over real sockets. Run from the repository root after
-`cargo build --release` in node/:
+`cargo build --release` at the root (both crates):
 
     python3 node/tests/e2e_snapshot.py
 
@@ -55,8 +55,8 @@ if __name__ == '__main__':
     try:
         main()
     finally:
-        for n in list(e2e.procs):
-            e2e.procs[n][0].terminate()
+        for p in [v[0] for v in e2e.procs.values()] + e2e.helpers:
+            p.terminate()
         if os.environ.get('KEEP'):
             print('logs in', e2e.TMP)
         else:
